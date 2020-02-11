@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2015 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2020 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,72 +32,57 @@
  ****************************************************************************/
 
 /**
-* @file standard.h
-* VTOL with fixed multirotor motor configurations (such as quad) and a pusher
-* (or puller aka tractor) motor for forward flight.
-*
-* @author Simon Wilks 		<simon@uaventure.com>
-* @author Roman Bapst 		<bapstroman@gmail.com>
-* @author Andreas Antener	<andreas@uaventure.com>
-* @author Sander Smeets 	<sander@droneslab.com>
-*
-*/
+ * @file hover_thrust_estimator.hpp
+ * @brief Interface class for a hover thrust estimator
+ * Convention is positive thrust, hover thrust and acceleration UP
+ *
+ * @author Mathieu Bresciani 	<brescianimathieu@gmail.com>
+ */
 
-#ifndef STANDARD_H
-#define STANDARD_H
-#include "vtol_type.h"
-#include <parameters/param.h>
+#pragma once
+
+#include <px4_platform_common/module_params.h>
+#include <uORB/Publication.hpp>
+#include <uORB/topics/hover_thrust_estimate.h>
 #include <drivers/drv_hrt.h>
 
-class Standard : public VtolType
+#include "zero_order_hover_thrust_ekf.hpp"
+
+class HoverThrustEstimator : public ModuleParams
 {
-
 public:
+	HoverThrustEstimator(ModuleParams *parent) :
+		ModuleParams(parent)
+	{
+		ZeroOrderHoverThrustEkf::status status{};
+		publishStatus(status);
+	}
+	~HoverThrustEstimator() = default;
 
-	Standard(VtolAttitudeControl *_att_controller);
-	~Standard() override = default;
+	void reset();
 
-	void update_vtol_state() override;
-	void update_transition_state() override;
-	void update_fw_state() override;
-	void update_mc_state() override;
-	void fill_actuator_outputs() override;
-	void waiting_on_tecs() override;
+	void update(float dt);
+
+	void setThrust(float thrust) { _thrust = thrust; };
+	void setAccel(float accel) { _acc_z = accel; };
+
+	float getHoverThrustEstimate() const { return _hover_thrust_ekf.getHoverThrustEstimate(); }
+
+protected:
+	void updateParams() override;
 
 private:
+	void publishStatus(ZeroOrderHoverThrustEkf::status &status);
 
-	struct {
-		float pusher_ramp_dt;
-		float back_trans_ramp;
-		float pitch_setpoint_offset;
-		float reverse_output;
-		float reverse_delay;
-	} _params_standard;
+	ZeroOrderHoverThrustEkf _hover_thrust_ekf{};
+	float _acc_z{};
+	float _thrust{};
 
-	struct {
-		param_t pusher_ramp_dt;
-		param_t back_trans_ramp;
-		param_t pitch_setpoint_offset;
-		param_t reverse_output;
-		param_t reverse_delay;
-	} _params_handles_standard;
+	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::HTE_HT_NOISE>) _param_hte_ht_noise,
+		(ParamFloat<px4::params::HTE_ACC_GATE>) _param_hte_acc_gate,
+		(ParamFloat<px4::params::HTE_HT_ERR_INIT>) _param_hte_ht_err_init
+	)
 
-	enum class vtol_mode {
-		MC_MODE = 0,
-		TRANSITION_TO_FW,
-		TRANSITION_TO_MC,
-		FW_MODE
-	};
-
-	struct {
-		vtol_mode flight_mode;			// indicates in which mode the vehicle is in
-		hrt_abstime transition_start;	// at what time did we start a transition (front- or backtransition)
-	} _vtol_schedule;
-
-	float _pusher_throttle{0.0f};
-	float _reverse_output{0.0f};
-	float _airspeed_trans_blend_margin{0.0f};
-
-	void parameters_update() override;
+	uORB::Publication<hover_thrust_estimate_s> _hover_thrust_ekf_pub{ORB_ID(hover_thrust_estimate)};
 };
-#endif
