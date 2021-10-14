@@ -158,7 +158,9 @@ MPU6000_SPI_interface(int bus, int device_type, bool external_bus)
 			break;
 
 		case MPU_DEVICE_TYPE_ICM20608:
-#if defined(PX4_SPIDEV_ICM_20608)
+#if defined(PX4_SPIDEV_ICM)
+			cs = PX4_SPIDEV_ICM;
+#elif defined(PX4_SPIDEV_ICM_20608)
 			cs = PX4_SPIDEV_ICM_20608;
 #endif
 			break;

@@ -12,7 +12,7 @@
 @###############################################
 @{
 import genmsg.msgs
-
+import gencpp
 from px_generate_uorb_topic_helper import * # this is in Tools/
 
 topic = alias if alias else spec.short_name
@@ -24,7 +24,7 @@ except AttributeError:
 /****************************************************************************
  *
  * Copyright 2017 Proyectos y Sistemas de Mantenimiento SL (eProsima).
- * Copyright (c) 2018-2019 PX4 Development Team. All rights reserved.
+ * Copyright (C) 2018-2019 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -74,10 +74,6 @@ except AttributeError:
 #include "@(topic)PubSubTypes.h"
 @[end if]@
 
-#include <atomic>
-#include <condition_variable>
-#include <queue>
-
 using namespace eprosima::fastrtps;
 using namespace eprosima::fastrtps::rtps;
 
@@ -86,7 +82,7 @@ class @(topic)_Subscriber
 public:
     @(topic)_Subscriber();
     virtual ~@(topic)_Subscriber();
-    bool init(uint8_t topic_ID, std::condition_variable* t_send_queue_cv, std::mutex* t_send_queue_mutex, std::queue<uint8_t>* t_send_queue);
+    bool init();
     void run();
     bool hasMsg();
 @[if 1.5 <= fastrtpsgen_version <= 1.7]@
@@ -102,8 +98,6 @@ public:
     @(topic) getMsg();
 @[    end if]@
 @[end if]@
-    void unlockMsg();
-
 private:
     Participant *mp_participant;
     Subscriber *mp_subscriber;
@@ -111,7 +105,7 @@ private:
     class SubListener : public SubscriberListener
     {
     public:
-        SubListener() : n_matched(0), n_msg(0), has_msg(false){};
+        SubListener() : n_matched(0), n_msg(0){};
         ~SubListener(){};
         void onSubscriptionMatched(Subscriber* sub, MatchingInfo& info);
         void onNewDataMessage(Subscriber* sub);
@@ -131,26 +125,20 @@ private:
         @(topic) msg;
 @[    end if]@
 @[end if]@
-        std::atomic_bool has_msg;
-        uint8_t topic_ID;
-        std::condition_variable* t_send_queue_cv;
-        std::mutex* t_send_queue_mutex;
-        std::queue<uint8_t>* t_send_queue;
-        std::condition_variable has_msg_cv;
-        std::mutex has_msg_mutex;
+        bool has_msg = false;
 
     } m_listener;
 @[if 1.5 <= fastrtpsgen_version <= 1.7]@
 @[    if ros2_distro]@
-    @(package)::msg::dds_::@(topic)_PubSubType @(topic)DataType;
+    @(package)::msg::dds_::@(topic)_PubSubType myType;
 @[    else]@
-    @(topic)_PubSubType @(topic)DataType;
+    @(topic)_PubSubType myType;
 @[    end if]@
 @[else]@
 @[    if ros2_distro]@
-    @(package)::msg::@(topic)PubSubType @(topic)DataType;
+    @(package)::msg::@(topic)PubSubType myType;
 @[    else]@
-    @(topic)PubSubType @(topic)DataType;
+    @(topic)PubSubType myType;
 @[    end if]@
 @[end if]@
 };

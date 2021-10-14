@@ -36,9 +36,9 @@
 #include <errno.h>
 #include <sys/socket.h>
 #include <cstdlib>
-#if __has_include("px4_platform_common/log.h") && __has_include("px4_platform_common/time.h")
-#include <px4_platform_common/log.h>
-#include <px4_platform_common/time.h>
+#if __has_include("px4_log.h") && __has_include("px4_time.h")
+#include <px4_log.h>
+#include <px4_time.h>
 #endif
 
 #include "microRTPS_transport.h"
@@ -150,7 +150,7 @@ ssize_t Transport_node::read(uint8_t *topic_ID, char out_buffer[], size_t buffer
 	// Start not found
 	if (msg_start_pos > rx_buff_pos - header_size) {
 #ifndef PX4_INFO
-		printf("                                 (↓↓ %u)\n", msg_start_pos);
+		printf("                                 (↓↓ %u)", msg_start_pos);
 #else
 		PX4_INFO("                                 (↓↓ %u)", msg_start_pos);
 #endif /* PX4_INFO */
@@ -161,7 +161,10 @@ ssize_t Transport_node::read(uint8_t *topic_ID, char out_buffer[], size_t buffer
 		return -1;
 	}
 
-	// [>,>,>,topic_ID,seq,payload_length_H,payload_length_L,CRCHigh,CRCLow,payloadStart, ... ,payloadEnd]
+	/*
+	 * [>,>,>,topic_ID,seq,payload_length_H,payload_length_L,CRCHigh,CRCLow,payloadStart, ... ,payloadEnd]
+	 */
+
 	struct Header *header = (struct Header *)&rx_buffer[msg_start_pos];
 	uint32_t payload_len = ((uint32_t)header->payload_len_h << 8) | header->payload_len_l;
 
@@ -175,7 +178,7 @@ ssize_t Transport_node::read(uint8_t *topic_ID, char out_buffer[], size_t buffer
 		// If there's garbage at the beginning, drop it
 		if (msg_start_pos > 0) {
 #ifndef PX4_INFO
-			printf("                                 (↓ %u)\n", msg_start_pos);
+			printf("                                 (↓ %u)", msg_start_pos);
 #else
 			PX4_INFO("                                 (↓ %u)", msg_start_pos);
 #endif /* PX4_INFO */
@@ -191,8 +194,8 @@ ssize_t Transport_node::read(uint8_t *topic_ID, char out_buffer[], size_t buffer
 
 	if (read_crc != calc_crc) {
 #ifndef PX4_ERR
-		printf("Bad CRC %u != %u\n", read_crc, calc_crc);
-		printf("                                 (↓ %lu)\n", (unsigned long)(header_size + payload_len));
+		printf("Bad CRC %u != %u", read_crc, calc_crc);
+		printf("                                 (↓ %lu)", (unsigned long)(header_size + payload_len));
 #else
 		PX4_ERR("Bad CRC %u != %u", read_crc, calc_crc);
 		PX4_ERR("                                 (↓ %lu)", (unsigned long)(header_size + payload_len));
@@ -213,7 +216,7 @@ ssize_t Transport_node::read(uint8_t *topic_ID, char out_buffer[], size_t buffer
 	return len;
 }
 
-size_t Transport_node::get_header_length()
+ssize_t Transport_node::get_header_length()
 {
     return sizeof(struct Header);
 }
@@ -224,10 +227,21 @@ ssize_t Transport_node::write(const uint8_t topic_ID, char buffer[], size_t leng
 		return -1;
 	}
 
-	static struct Header header = {{'>', '>', '>'}, 0u, 0u, 0u, 0u, 0u, 0u};
+	static struct Header header = {
+		.marker = {'>', '>', '>'},
+		.topic_ID = 0u,
+		.seq = 0u,
+		.payload_len_h = 0u,
+		.payload_len_l = 0u,
+		.crc_h = 0u,
+		.crc_l = 0u
+
+	};
+
 	static uint8_t seq = 0;
 
 	// [>,>,>,topic_ID,seq,payload_length,CRCHigh,CRCLow,payload_start, ... ,payload_end]
+
 	uint16_t crc = crc16((uint8_t *)&buffer[sizeof(header)], length);
 
 	header.topic_ID = topic_ID;
@@ -238,13 +252,20 @@ ssize_t Transport_node::write(const uint8_t topic_ID, char buffer[], size_t leng
 	header.crc_l = crc & 0xff;
 
 	/* Headroom for header is created in client */
-	/* Fill in the header in the same payload buffer to call a single node_write */
+	/*Fill in the header in the same payload buffer to call a single node_write */
 	memcpy(buffer, &header, sizeof(header));
 	ssize_t len = node_write(buffer, length + sizeof(header));
 	if (len != ssize_t(length + sizeof(header))) {
-		return len;
+		goto err;
 	}
 	return len + sizeof(header);
+
+err:
+	//int errsv = errno;
+	//if (len == -1 ) PX4_ERR("                               => Writing error '%d'", errsv);
+	//else            PX4_ERR("                               => Wrote '%ld' != length(%lu) error '%d'", (long)len, (unsigned long)length, errsv);
+
+	return len;
 }
 
 UART_node::UART_node(const char *_uart_name, uint32_t _baudrate, uint32_t _poll_ms):
@@ -270,7 +291,7 @@ int UART_node::init()
 
 	if (uart_fd < 0) {
 #ifndef PX4_ERR
-		printf("Failed to open device: %s (%d)\n", uart_name, errno);
+		printf("Failed to open device: %s (%d)", uart_name, errno);
 #else
 		PX4_ERR("Failed to open device: %s (%d)", uart_name, errno);
 #endif /* PX4_ERR */
@@ -290,7 +311,7 @@ int UART_node::init()
 	if ((termios_state = tcgetattr(uart_fd, &uart_config)) < 0) {
 		int errno_bkp = errno;
 #ifndef PX4_ERR
-		printf("ERR GET CONF %s: %d (%d)\n", uart_name, termios_state, errno);
+		printf("ERR GET CONF %s: %d (%d)", uart_name, termios_state, errno);
 #else
 		PX4_ERR("ERR GET CONF %s: %d (%d)", uart_name, termios_state, errno);
 #endif /* PX4_ERR */
@@ -330,7 +351,7 @@ int UART_node::init()
 		if (cfsetispeed(&uart_config, speed) < 0 || cfsetospeed(&uart_config, speed) < 0) {
 			int errno_bkp = errno;
 #ifndef PX4_ERR
-			printf("ERR SET BAUD %s: %d (%d)\n", uart_name, termios_state, errno);
+			printf("ERR SET BAUD %s: %d (%d)", uart_name, termios_state, errno);
 #else
 			PX4_ERR("ERR SET BAUD %s: %d (%d)", uart_name, termios_state, errno);
 #endif /* PX4_ERR */
@@ -342,7 +363,7 @@ int UART_node::init()
 	if ((termios_state = tcsetattr(uart_fd, TCSANOW, &uart_config)) < 0) {
 		int errno_bkp = errno;
 #ifndef PX4_ERR
-		printf("ERR SET CONF %s (%d)\n", uart_name, errno);
+		printf("ERR SET CONF %s (%d)", uart_name, errno);
 #else
 		PX4_ERR("ERR SET CONF %s (%d)", uart_name, errno);
 #endif /* PX4_ERR */
@@ -359,22 +380,22 @@ int UART_node::init()
  * According to px4_time.h, px4_usleep() is only defined when lockstep is set
  * to be used
  */
-#ifndef px4_usleep
+#ifndef ENABLE_LOCKSTEP_SCHEDULER
 		usleep(1000);
 #else
 		px4_usleep(1000);
-#endif /* px4_usleep */
+#endif /* ENABLE_LOCKSTEP_SCHEDULER */
 	}
 
 	if (flush) {
 #ifndef PX4_INFO
-		printf("Flush\n");
+		printf("Flush");
 #else
 		PX4_INFO("Flush");
 #endif /* PX4_INFO */
 	} else {
 #ifndef PX4_INFO
-		printf("No flush\n");
+		printf("No flush");
 #else
 		PX4_INFO("No flush");
 #endif /* PX4_INFO */
@@ -395,7 +416,7 @@ uint8_t UART_node::close()
 {
 	if (-1 != uart_fd) {
 #ifndef PX4_WARN
-		printf("Closed UART...\n");
+		printf("Closed UART...");
 #else
 		PX4_WARN("Closed UART...");
 #endif /* PX4_WARN */
@@ -514,15 +535,12 @@ bool UART_node::baudrate_to_speed(uint32_t bauds, speed_t *speed)
 	return true;
 }
 
-UDP_node::UDP_node(const char* _udp_ip, uint16_t _udp_port_recv, uint16_t _udp_port_send):
+UDP_node::UDP_node(uint16_t _udp_port_recv, uint16_t _udp_port_send):
 	sender_fd(-1),
 	receiver_fd(-1),
 	udp_port_recv(_udp_port_recv),
 	udp_port_send(_udp_port_send)
 {
-    if (nullptr != _udp_ip) {
-            strcpy(udp_ip, _udp_ip);
-    }
 }
 
 UDP_node::~UDP_node()
@@ -546,7 +564,7 @@ bool UDP_node::fds_OK()
 
 int UDP_node::init_receiver(uint16_t udp_port)
 {
-#if !defined (__PX4_NUTTX) || (defined (CONFIG_NET) && defined (__PX4_NUTTX))
+#ifndef __PX4_NUTTX
 	// udp socket data
 	memset((char *)&receiver_inaddr, 0, sizeof(receiver_inaddr));
 	receiver_inaddr.sin_family = AF_INET;
@@ -555,28 +573,28 @@ int UDP_node::init_receiver(uint16_t udp_port)
 
 	if ((receiver_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
 #ifndef PX4_ERR
-		printf("Create socket failed\n");
+		printf("Create socket failed");
 #else
 		PX4_ERR("Create socket failed");
 #endif /* PX4_ERR */
 		return -1;
 	}
 #ifndef PX4_INFO
-	printf("- Trying to connect...");
+	printf("Trying to connect...");
 #else
 	PX4_INFO("Trying to connect...");
 #endif /* PX4_INFO */
 
 	if (bind(receiver_fd, (struct sockaddr *)&receiver_inaddr, sizeof(receiver_inaddr)) < 0) {
 #ifndef PX4_ERR
-		printf("Bind failed\n");
+		printf("Bind failed");
 #else
 		PX4_ERR("Bind failed");
 #endif /* PX4_ERR */
 		return -1;
 	}
 #ifndef PX4_INFO
-	printf("Connected to server!\n\n");
+	printf("Connected to server!");
 #else
 	PX4_INFO("Connected to server!");
 #endif /* PX4_INFO */
@@ -586,11 +604,11 @@ int UDP_node::init_receiver(uint16_t udp_port)
 
 int UDP_node::init_sender(uint16_t udp_port)
 {
-#if !defined (__PX4_NUTTX) || (defined (CONFIG_NET) && defined (__PX4_NUTTX))
+#ifndef __PX4_NUTTX
 
 	if ((sender_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
 #ifndef PX4_ERR
-		printf("Create socket failed\n");
+		printf("Create socket failed");
 #else
 		PX4_ERR("Create socket failed");
 #endif /* PX4_ERR */
@@ -601,9 +619,9 @@ int UDP_node::init_sender(uint16_t udp_port)
 	sender_outaddr.sin_family = AF_INET;
 	sender_outaddr.sin_port = htons(udp_port);
 
-	if (inet_aton(udp_ip, &sender_outaddr.sin_addr) == 0) {
+	if (inet_aton("127.0.0.1", &sender_outaddr.sin_addr) == 0) {
 #ifndef PX4_ERR
-		printf("inet_aton() failed\n");
+		printf("inet_aton() failed");
 #else
 		PX4_ERR("inet_aton() failed");
 #endif /* PX4_ERR */
@@ -617,11 +635,11 @@ int UDP_node::init_sender(uint16_t udp_port)
 
 uint8_t UDP_node::close()
 {
-#if !defined (__PX4_NUTTX) || (defined (CONFIG_NET) && defined (__PX4_NUTTX))
+#ifndef __PX4_NUTTX
 
 	if (sender_fd != -1) {
 #ifndef PX4_WARN
-		printf("Closed sender socket!\n");
+		printf("Closed sender socket!");
 #else
 		PX4_WARN("Closed sender socket!");
 #endif /* PX4_WARN */
@@ -632,7 +650,7 @@ uint8_t UDP_node::close()
 
 	if (receiver_fd != -1) {
 #ifndef PX4_WARN
-		printf("Closed receiver socket!\n");
+		printf("Closed receiver socket!");
 #else
 		PX4_WARN("Closed receiver socket!");
 #endif /* PX4_WARN */
@@ -652,7 +670,7 @@ ssize_t UDP_node::node_read(void *buffer, size_t len)
 	}
 
 	int ret = 0;
-#if !defined (__PX4_NUTTX) || (defined (CONFIG_NET) && defined (__PX4_NUTTX))
+#ifndef __PX4_NUTTX
 	// Blocking call
 	static socklen_t addrlen = sizeof(receiver_outaddr);
 	ret = recvfrom(receiver_fd, buffer, len, 0, (struct sockaddr *) &receiver_outaddr, &addrlen);
@@ -667,7 +685,7 @@ ssize_t UDP_node::node_write(void *buffer, size_t len)
 	}
 
 	int ret = 0;
-#if !defined (__PX4_NUTTX) || (defined (CONFIG_NET) && defined (__PX4_NUTTX))
+#ifndef __PX4_NUTTX
 	ret = sendto(sender_fd, buffer, len, 0, (struct sockaddr *)&sender_outaddr, sizeof(sender_outaddr));
 #endif /* __PX4_NUTTX */
 	return ret;

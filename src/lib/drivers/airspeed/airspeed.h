@@ -37,11 +37,11 @@
 #include <drivers/device/i2c.h>
 #include <drivers/drv_airspeed.h>
 #include <drivers/drv_hrt.h>
-#include <px4_platform_common/px4_config.h>
-#include <px4_platform_common/defines.h>
+#include <px4_config.h>
+#include <px4_defines.h>
 #include <perf/perf_counter.h>
 #include <uORB/topics/differential_pressure.h>
-#include <uORB/PublicationMulti.hpp>
+#include <uORB/uORB.h>
 #include <px4_platform_common/px4_work_queue/ScheduledWorkItem.hpp>
 
 /* Default I2C bus */
@@ -78,8 +78,7 @@ protected:
 	bool			_collect_phase;
 	float			_diff_pres_offset;
 
-	uORB::PublicationMulti<differential_pressure_s>	_airspeed_pub{ORB_ID(differential_pressure)};
-
+	orb_advert_t		_airspeed_pub;
 	int			_airspeed_orb_class_instance;
 
 	int			_class_instance;

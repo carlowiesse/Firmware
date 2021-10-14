@@ -33,9 +33,9 @@
 
 #include "LowPassFilter2p.hpp"
 
-#include <px4_platform_common/defines.h>
+#include <px4_defines.h>
 
-#include <math.h>
+#include <cmath>
 
 namespace math
 {

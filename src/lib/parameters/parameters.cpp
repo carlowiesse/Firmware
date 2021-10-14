@@ -41,9 +41,7 @@
  * and background parameter saving.
  */
 
-#define PARAM_IMPLEMENTATION
 #include "param.h"
-#include "param_translation.h"
 #include <parameters/px4_parameters.h>
 #include "tinybson/tinybson.h"
 
@@ -53,19 +51,24 @@
 
 #include <drivers/drv_hrt.h>
 #include <lib/perf/perf_counter.h>
-#include <px4_platform_common/px4_config.h>
-#include <px4_platform_common/defines.h>
-#include <px4_platform_common/posix.h>
-#include <px4_platform_common/sem.h>
-#include <px4_platform_common/shutdown.h>
+#include <px4_config.h>
+#include <px4_defines.h>
+#include <px4_posix.h>
+#include <px4_sem.h>
+#include <px4_shutdown.h>
 #include <systemlib/uthash/utarray.h>
 
 using namespace time_literals;
 
-#include "uORB/uORB.h"
-#include "uORB/topics/parameter_update.h"
-#include <uORB/topics/actuator_armed.h>
-#include <uORB/Subscription.hpp>
+//#define PARAM_NO_ORB ///< if defined, avoid uorb dependency. This disables publication of parameter_update on param change
+//#define PARAM_NO_AUTOSAVE ///< if defined, do not autosave (avoids LP work queue dependency)
+
+#if !defined(PARAM_NO_ORB)
+# include "uORB/uORB.h"
+# include "uORB/topics/parameter_update.h"
+# include <uORB/topics/actuator_armed.h>
+# include <uORB/Subscription.hpp>
+#endif
 
 #if defined(FLASH_BASED_PARAMS)
 #include "flashparams/flashparams.h"
@@ -87,12 +90,14 @@ static char *param_user_file = nullptr;
 #define PARAM_CLOSE	close
 #endif
 
-#include <px4_platform_common/workqueue.h>
+#ifndef PARAM_NO_AUTOSAVE
+#include <px4_workqueue.h>
 /* autosaving variables */
 static hrt_abstime last_autosave_timestamp = 0;
 static struct work_s autosave_work {};
 static volatile bool autosave_scheduled = false;
 static bool autosave_disabled = false;
+#endif /* PARAM_NO_AUTOSAVE */
 
 /**
  * Array of static parameter info.
@@ -141,9 +146,11 @@ UT_array *param_values{nullptr};
 /** array info for the modified parameters array */
 const UT_icd param_icd = {sizeof(param_wbuf_s), nullptr, nullptr, nullptr};
 
+#if !defined(PARAM_NO_ORB)
 /** parameter update topic handle */
 static orb_advert_t param_topic = nullptr;
 static unsigned int param_instance = 0;
+#endif
 
 static void param_set_used_internal(param_t param);
 
@@ -293,6 +300,7 @@ param_find_changed(param_t param)
 static void
 _param_notify_changes()
 {
+#if !defined(PARAM_NO_ORB)
 	parameter_update_s pup = {};
 	pup.timestamp = hrt_absolute_time();
 	pup.instance = param_instance++;
@@ -307,6 +315,8 @@ _param_notify_changes()
 	} else {
 		orb_publish(ORB_ID(parameter_update), param_topic, &pup);
 	}
+
+#endif
 }
 
 void
@@ -491,7 +501,7 @@ param_value_is_default(param_t param)
 	param_lock_reader();
 	s = param_find_changed(param);
 	param_unlock_reader();
-	return s == nullptr;
+	return s ? false : true;
 }
 
 bool
@@ -596,6 +606,7 @@ param_get(param_t param, void *val)
 	return result;
 }
 
+#ifndef PARAM_NO_AUTOSAVE
 /**
  * worker callback method to save the parameters
  * @param arg unused
@@ -604,6 +615,8 @@ static void
 autosave_worker(void *arg)
 {
 	bool disabled = false;
+
+#if !defined(PARAM_NO_ORB)
 
 	if (!param_get_default_file()) {
 		// In case we save to FLASH, defer param writes until disarmed,
@@ -615,6 +628,8 @@ autosave_worker(void *arg)
 			return;
 		}
 	}
+
+#endif
 
 	param_lock_writer();
 	last_autosave_timestamp = hrt_absolute_time();
@@ -633,6 +648,7 @@ autosave_worker(void *arg)
 		PX4_ERR("param auto save failed (%i)", ret);
 	}
 }
+#endif /* PARAM_NO_AUTOSAVE */
 
 /**
  * Automatically save the parameters after a timeout and limited rate.
@@ -643,6 +659,8 @@ autosave_worker(void *arg)
 static void
 param_autosave()
 {
+#ifndef PARAM_NO_AUTOSAVE
+
 	if (autosave_scheduled || autosave_disabled) {
 		return;
 	}
@@ -662,11 +680,13 @@ param_autosave()
 
 	autosave_scheduled = true;
 	work_queue(LPWORK, &autosave_work, (worker_t)&autosave_worker, nullptr, USEC2TICK(delay));
+#endif /* PARAM_NO_AUTOSAVE */
 }
 
 void
 param_control_autosave(bool enable)
 {
+#ifndef PARAM_NO_AUTOSAVE
 	param_lock_writer();
 
 	if (!enable && autosave_scheduled) {
@@ -676,6 +696,7 @@ param_control_autosave(bool enable)
 
 	autosave_disabled = !enable;
 	param_unlock_writer();
+#endif /* PARAM_NO_AUTOSAVE */
 }
 
 static int
@@ -1263,8 +1284,6 @@ param_import_callback(bson_decoder_t decoder, void *priv, bson_node_t node)
 		goto out;
 	}
 
-	param_modify_on_import(node->name, node->type, v);
-
 	if (param_set_internal(param, v, state->mark_saved, true)) {
 		PX4_DEBUG("error setting value for '%s'", node->name);
 		goto out;
@@ -1391,11 +1410,14 @@ void param_print_status()
 			 utarray_len(param_values), param_values->n, param_values->n * sizeof(UT_icd));
 	}
 
+#ifndef PARAM_NO_AUTOSAVE
 	PX4_INFO("auto save: %s", autosave_disabled ? "off" : "on");
 
 	if (!autosave_disabled && (last_autosave_timestamp > 0)) {
 		PX4_INFO("last auto save: %.3f seconds ago", hrt_elapsed_time(&last_autosave_timestamp) * 1e-6);
 	}
+
+#endif /* PARAM_NO_AUTOSAVE */
 
 	perf_print_counter(param_export_perf);
 	perf_print_counter(param_find_perf);

@@ -61,8 +61,8 @@ struct Allocator : public uavcan::HeapBasedPoolAllocator<uavcan::MemPoolBlockSiz
 	~Allocator()
 	{
 		if (getNumAllocatedBlocks() > 0) {
-			PX4_ERR("UAVCAN LEAKS MEMORY: %u BLOCKS (%u BYTES) LOST",
-				getNumAllocatedBlocks(), getNumAllocatedBlocks() * uavcan::MemPoolBlockSize);
+			warnx("UAVCAN LEAKS MEMORY: %u BLOCKS (%u BYTES) LOST",
+			      getNumAllocatedBlocks(), getNumAllocatedBlocks() * uavcan::MemPoolBlockSize);
 		}
 	}
 };

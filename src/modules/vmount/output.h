@@ -42,11 +42,9 @@
 #include "common.h"
 #include <drivers/drv_hrt.h>
 #include <lib/ecl/geo/geo.h>
-#include <uORB/Publication.hpp>
-#include <uORB/Subscription.hpp>
-#include <uORB/topics/mount_orientation.h>
-#include <uORB/topics/vehicle_attitude.h>
+#include <uORB/uORB.h>
 #include <uORB/topics/vehicle_global_position.h>
+
 
 namespace vmount
 {
@@ -79,9 +77,9 @@ class OutputBase
 {
 public:
 	OutputBase(const OutputConfig &output_config);
-	virtual ~OutputBase() = default;
+	virtual ~OutputBase();
 
-	virtual int initialize() { return 0; }
+	virtual int initialize();
 
 	/**
 	 * Update the output.
@@ -121,11 +119,13 @@ protected:
 	float _angle_outputs[3] = { 0.f, 0.f, 0.f }; ///< calculated output angles (roll, pitch, yaw) [rad]
 	hrt_abstime _last_update;
 
-private:
-	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
-	uORB::Subscription _vehicle_global_position_sub{ORB_ID(vehicle_global_position)};
+	int _get_vehicle_attitude_sub() const { return _vehicle_attitude_sub; }
 
-	uORB::Publication<mount_orientation_s> _mount_orientation_pub{ORB_ID(mount_orientation)};
+private:
+	int _vehicle_attitude_sub = -1;
+	int _vehicle_global_position_sub = -1;
+
+	orb_advert_t _mount_orientation_pub = nullptr;
 };
 
 

@@ -36,10 +36,10 @@ def analyse_ekf(
         raise PreconditionError('could not find estimator_status data')
 
     try:
-        _ = ulog.get_dataset('estimator_innovations').data
-        print('found estimator_innovations data')
+        _ = ulog.get_dataset('ekf2_innovations').data
+        print('found ekf2_innovation data')
     except:
-        raise PreconditionError('could not find estimator_innovations data')
+        raise PreconditionError('could not find ekf2_innovation data')
 
     try:
         in_air = InAirDetector(
@@ -129,6 +129,9 @@ def find_checks_that_apply(
         innov_fail_checks.append('ofy')
 
     return sensor_checks, innov_fail_checks
+
+
+
 
 
 

@@ -8,7 +8,7 @@ import codecs
 import re
 import colorsys
 import json
-import sys
+
 
 
 parser = argparse.ArgumentParser(
@@ -225,6 +225,7 @@ class Graph(object):
     ('listener', r'.*', None, r'^(id)$'),
     ('logger', r'.*', None, r'^(topic|sub\.metadata|_polling_topic_meta)$'),
 
+    ('uavcan', r'uavcan_main\.cpp$', r'\b_control_topics\[[0-9]\]=([^,)]+)', r'^_control_topics\[i\]$'),
     ('tap_esc', r'.*', r'\b_control_topics\[[0-9]\]=([^,)]+)', r'^_control_topics\[i\]$'),
     ('snapdragon_pwm_out', r'.*', r'\b_controls_topics\[[0-9]\]=([^,)]+)', r'^_controls_topics\[i\]$'),
     ('linux_pwm_out', r'.*', r'\b_controls_topics\[[0-9]\]=([^,)]+)', r'^_controls_topics\[i\]$'),
@@ -239,6 +240,15 @@ class Graph(object):
 
         special_cases_pub = [
     ('replay', r'Replay\.cpp$', None, r'^sub\.orb_meta$'),
+    ('fw_pos_control_l1', r'FixedwingPositionControl\.cpp$', r'\b_attitude_setpoint_id=([^,)]+)', r'^_attitude_setpoint_id$'),
+
+    ('mc_pos_control', r'mc_pos_control_main\.cpp$', r'\b_attitude_setpoint_id=([^,)]+)', r'^_attitude_setpoint_id$'),
+
+    ('mc_att_control', r'mc_att_control_main\.cpp$', r'\b_actuators_id=([^,)]+)', r'^_actuators_id$'),
+    ('mc_att_control', r'mc_att_control_main\.cpp$', r'\_attitude_sp_id=([^,)]+)', r'^_attitude_sp_id$'),
+
+    ('fw_att_control', r'FixedwingAttitudeControl\.cpp$', r'\b_actuators_id=([^,)]+)', r'^_actuators_id$'),
+    ('fw_att_control', r'FixedwingAttitudeControl\.cpp$', r'\b_attitude_setpoint_id=([^,)]+)', r'^_attitude_setpoint_id$'),
 
     ('uavcan', r'sensors/.*\.cpp$', r'\bUavcanCDevSensorBridgeBase\([^{]*DEVICE_PATH,([^,)]+)', r'^_orb_topic$'),
     ]
@@ -277,8 +287,8 @@ class Graph(object):
             self._publications.filter_modules(self._module_whitelist)
 
         # modules & topics sets
-        self._modules = set(list(self._publications.pubsubs.keys()) +
-                list(self._subscriptions.pubsubs.keys()))
+        self._modules = set(self._publications.pubsubs.keys() +
+                self._subscriptions.pubsubs.keys())
         print('number of modules: '+str(len(self._modules)))
         self._topics = self._get_topics(use_topic_pubsub_union=use_topic_pubsub_union)
         print('number of topics: '+str(len(self._topics)))
@@ -344,7 +354,7 @@ class Graph(object):
     def _extract_module_name(self, file_name):
         """ extract the module name from a CMakeLists.txt file and store
             in self._current_module if there is any """
-        datafile = open(file_name)
+        datafile = file(file_name)
         found_module_def = False
         for line in datafile:
             if 'px4_add_module' in line: # must contain 'px4_add_module'
@@ -367,7 +377,7 @@ class Graph(object):
             try:
                 content = f.read()
             except:
-                print('Failed reading file: %s, skipping content.' % file_name)
+                print('Failed reading file: %s, skipping content.' % path)
                 return
 
 
@@ -610,13 +620,11 @@ if args.output == 'json':
 elif args.output == 'graphviz':
     try:
         from graphviz import Digraph
-    except ImportError as e:
-        print("Failed to import graphviz: " + e)
+    except:
+        print("Failed to import graphviz.")
+        print("You may need to install it with 'pip install graphviz'")
         print("")
-        print("You may need to install it with:")
-        print("    pip3 install --user graphviz")
-        print("")
-        sys.exit(1)
+        raise
     output_graphviz = OutputGraphviz(graph)
     engine='fdp' # use neato or fdp
     output_graphviz.write(args.file+'.fv', engine=engine)

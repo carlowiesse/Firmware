@@ -137,25 +137,20 @@ void Tiltrotor::update_vtol_state()
 			break;
 
 		case vtol_mode::TRANSITION_FRONT_P1: {
+				// allow switch if we are not armed for the sake of bench testing
+				bool transition_to_p2 = can_transition_on_ground();
 
 				float time_since_trans_start = (float)(hrt_absolute_time() - _vtol_schedule.transition_start) * 1e-6f;
 
-				const bool airspeed_triggers_transition = PX4_ISFINITE(_airspeed_validated->equivalent_airspeed_m_s)
-						&& !_params->airspeed_disabled;
+				// check if we have reached airspeed to switch to fw mode
+				transition_to_p2 |= !_params->airspeed_disabled &&
+						    _airspeed->indicated_airspeed_m_s >= _params->transition_airspeed &&
+						    time_since_trans_start > _params->front_trans_time_min;
 
-				bool transition_to_p2 = false;
-
-				if (time_since_trans_start > _params->front_trans_time_min) {
-					if (airspeed_triggers_transition) {
-						transition_to_p2 = _airspeed_validated->equivalent_airspeed_m_s >= _params->transition_airspeed;
-
-					} else {
-						transition_to_p2 = _tilt_control >= _params_tiltrotor.tilt_transition &&
-								   time_since_trans_start > _params->front_trans_time_openloop;;
-					}
-				}
-
-				transition_to_p2 |= can_transition_on_ground();
+				// check if airspeed is invalid and transition by time
+				transition_to_p2 |= _params->airspeed_disabled &&
+						    _tilt_control >= _params_tiltrotor.tilt_transition &&
+						    time_since_trans_start > _params->front_trans_time_openloop;
 
 				if (transition_to_p2) {
 					_vtol_schedule.flight_mode = vtol_mode::TRANSITION_FRONT_P2;
@@ -207,9 +202,8 @@ void Tiltrotor::update_mc_state()
 {
 	VtolType::update_mc_state();
 
-	_tilt_control = VtolType::pusher_assist();
-
-	_v_att_sp->thrust_body[2] = Tiltrotor::thrust_compensation_for_tilt();
+	// make sure motors are not tilted
+	_tilt_control = _params_tiltrotor.tilt_mc;
 }
 
 void Tiltrotor::update_fw_state()
@@ -232,7 +226,7 @@ void Tiltrotor::update_transition_state()
 	}
 
 	if (_vtol_schedule.flight_mode == vtol_mode::TRANSITION_FRONT_P1) {
-		// for the first part of the transition all rotors are enabled
+		// for the first part of the transition the rear rotors are enabled
 		if (_motor_state != motor_state::ENABLED) {
 			_motor_state = set_motor_state(_motor_state, motor_state::ENABLED);
 		}
@@ -250,20 +244,18 @@ void Tiltrotor::update_transition_state()
 		_mc_yaw_weight = 1.0f;
 
 		// reduce MC controls once the plane has picked up speed
-		if (!_params->airspeed_disabled && PX4_ISFINITE(_airspeed_validated->equivalent_airspeed_m_s) &&
-		    _airspeed_validated->equivalent_airspeed_m_s > ARSP_YAW_CTRL_DISABLE) {
+		if (!_params->airspeed_disabled && _airspeed->indicated_airspeed_m_s > ARSP_YAW_CTRL_DISABLE) {
 			_mc_yaw_weight = 0.0f;
 		}
 
-		if (!_params->airspeed_disabled && PX4_ISFINITE(_airspeed_validated->equivalent_airspeed_m_s) &&
-		    _airspeed_validated->equivalent_airspeed_m_s >= _params->airspeed_blend) {
-			_mc_roll_weight = 1.0f - (_airspeed_validated->equivalent_airspeed_m_s - _params->airspeed_blend) /
+		if (!_params->airspeed_disabled && _airspeed->indicated_airspeed_m_s >= _params->airspeed_blend) {
+			_mc_roll_weight = 1.0f - (_airspeed->indicated_airspeed_m_s - _params->airspeed_blend) /
 					  (_params->transition_airspeed - _params->airspeed_blend);
 		}
 
 		// without airspeed do timed weight changes
-		if ((_params->airspeed_disabled || !PX4_ISFINITE(_airspeed_validated->equivalent_airspeed_m_s)) &&
-		    time_since_trans_start > _params->front_trans_time_min) {
+		if (_params->airspeed_disabled
+		    && time_since_trans_start > _params->front_trans_time_min) {
 			_mc_roll_weight = 1.0f - (time_since_trans_start - _params->front_trans_time_min) /
 					  (_params->front_trans_time_openloop - _params->front_trans_time_min);
 			_mc_yaw_weight = _mc_roll_weight;
@@ -280,18 +272,17 @@ void Tiltrotor::update_transition_state()
 		_mc_roll_weight = 0.0f;
 		_mc_yaw_weight = 0.0f;
 
-		// ramp down motors not used in fixed-wing flight (setting MAX_PWM down scales the given output into the new range)
-		int ramp_down_value = (1.0f - time_since_trans_start / _params_tiltrotor.front_trans_dur_p2) *
-				      (PWM_DEFAULT_MAX - PWM_DEFAULT_MIN) + PWM_DEFAULT_MIN;
+		// ramp down rear motors (setting MAX_PWM down scales the given output into the new range)
+		int rear_value = (1.0f - time_since_trans_start / _params_tiltrotor.front_trans_dur_p2) *
+				 (PWM_DEFAULT_MAX - PWM_DEFAULT_MIN) + PWM_DEFAULT_MIN;
 
 
-		_motor_state = set_motor_state(_motor_state, motor_state::VALUE, ramp_down_value);
+		_motor_state = set_motor_state(_motor_state, motor_state::VALUE, rear_value);
 
 
 		_thrust_transition = -_mc_virtual_att_sp->thrust_body[2];
 
 	} else if (_vtol_schedule.flight_mode == vtol_mode::TRANSITION_BACK) {
-		// turn on all MC motors
 		if (_motor_state != motor_state::ENABLED) {
 			_motor_state = set_motor_state(_motor_state, motor_state::ENABLED);
 		}
@@ -388,18 +379,4 @@ void Tiltrotor::fill_actuator_outputs()
 		_actuators_out_1->control[actuator_controls_s::INDEX_YAW] =
 			_actuators_fw_in->control[actuator_controls_s::INDEX_YAW];
 	}
-}
-
-/*
- * Increase combined thrust of MC propellers if motors are tilted. Assumes that all MC motors are tilted equally.
- */
-
-float Tiltrotor::thrust_compensation_for_tilt()
-{
-	// only compensate for tilt angle up to 0.5 * max tilt
-	float compensated_tilt = math::constrain(_tilt_control, 0.0f, 0.5f);
-
-	// increase vertical thrust by 1/cos(tilt), limmit to [-1,0]
-	return math::constrain(_v_att_sp->thrust_body[2] / cosf(compensated_tilt * M_PI_2_F), -1.0f, 0.0f);
-
 }

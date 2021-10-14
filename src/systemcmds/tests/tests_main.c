@@ -40,7 +40,7 @@
 
 #include "tests_main.h"
 
-#include <px4_platform_common/px4_config.h>
+#include <px4_config.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -83,6 +83,7 @@ const struct {
 	{"bezier",		test_bezierQuad,	0},
 	{"bson",		test_bson,		0},
 	{"conv",		test_conv,		0},
+	{"ctlmath",		test_controlmath,	0},
 	{"dataman",		test_dataman,		OPT_NOJIGTEST | OPT_NOALLTEST},
 	{"file2",		test_file2,		OPT_NOJIGTEST},
 	{"float",		test_float,		0},
@@ -120,8 +121,9 @@ const struct {
 	/* external tests */
 	{"commander",		commander_tests_main,	0},
 	{"controllib",		controllib_test_main,	0},
+#ifndef __PX4_NUTTX
 	{"mavlink",		mavlink_tests_main,	0},
-#ifdef __PX4_NUTTX
+#else
 	{"sf0x",		sf0x_tests_main,	0},
 #endif
 	{"uorb",		uorb_tests_main,	0},

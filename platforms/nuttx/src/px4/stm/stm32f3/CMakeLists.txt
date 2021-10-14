@@ -32,9 +32,6 @@
 ############################################################################
 
 
-add_subdirectory(board_critmon)
-add_subdirectory(../stm32_common/board_reset board_reset)
-add_subdirectory(../stm32_common/version version)
 add_subdirectory(../stm32_common/hrt hrt)
 
 

@@ -33,21 +33,17 @@
 
 add_library(drivers_board
 	can.c
-	i2c.cpp
 	init.c
 	led.c
 	manifest.c
 	sdio.c
 	spi.cpp
-	timer_config.cpp
+	timer_config.c
 	usb.c
 )
-add_dependencies(drivers_board arch_board_hw_info)
 
 target_link_libraries(drivers_board
 	PRIVATE
-		arch_spi
-		arch_board_hw_info
 		drivers__led # drv_led_start
 		nuttx_arch # sdio
 		nuttx_drivers # sdio

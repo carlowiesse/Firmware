@@ -41,8 +41,8 @@
  *
  */
 
-#include <px4_platform_common/px4_config.h>
-#include <px4_platform_common/tasks.h>
+#include <px4_config.h>
+#include <px4_tasks.h>
 #include <drivers/device/i2c.h>
 #include <parameters/param.h>
 
@@ -72,7 +72,7 @@
 #include <drivers/drv_tone_alarm.h>
 
 #include <systemlib/err.h>
-#include <lib/mixer/MixerGroup.hpp>
+#include <lib/mixer/mixer.h>
 
 #include <uORB/topics/actuator_controls.h>
 #include <uORB/topics/actuator_outputs.h>
@@ -617,6 +617,16 @@ MK::task_main()
 				esc.esc[i].esc_voltage = 0.0F;
 				esc.esc[i].esc_current = static_cast<float>(Motor[i].Current) * 0.1F;
 				esc.esc[i].esc_rpm = (uint16_t) 0;
+				esc.esc[i].esc_setpoint = (float) Motor[i].SetPoint_PX4;
+
+				if (Motor[i].Version == 1) {
+					// BLCtrl 2.0 (11Bit)
+					esc.esc[i].esc_setpoint_raw = (uint16_t)(Motor[i].SetPoint << 3) | Motor[i].SetPointLowerBits;
+
+				} else {
+					// BLCtrl < 2.0 (8Bit)
+					esc.esc[i].esc_setpoint_raw = (uint16_t) Motor[i].SetPoint;
+				}
 
 				esc.esc[i].esc_temperature = static_cast<uint8_t>(Motor[i].Temperature);
 				esc.esc[i].esc_state = (uint8_t) Motor[i].State;
@@ -1028,6 +1038,7 @@ MK::pwm_ioctl(file *filp, int cmd, unsigned long arg)
 		break;
 
 	case PWM_SERVO_GET_COUNT:
+	case MIXERIOCGETOUTPUTCOUNT:
 		*(unsigned *)arg = _num_outputs;
 		break;
 
@@ -1044,7 +1055,7 @@ MK::pwm_ioctl(file *filp, int cmd, unsigned long arg)
 			unsigned buflen = strlen(buf);
 
 			if (_mixers == nullptr) {
-				_mixers = new MixerGroup();
+				_mixers = new MixerGroup(control_callback, (uintptr_t)&_controls);
 			}
 
 			if (_mixers == nullptr) {
@@ -1052,7 +1063,7 @@ MK::pwm_ioctl(file *filp, int cmd, unsigned long arg)
 
 			} else {
 
-				ret = _mixers->load_from_buf(control_callback, (uintptr_t)&_controls, buf, buflen);
+				ret = _mixers->load_from_buf(buf, buflen);
 
 				if (ret != 0) {
 					DEVICE_DEBUG("mixer load failed with %d", ret);

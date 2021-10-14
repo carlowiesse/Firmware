@@ -33,7 +33,4 @@
 
 px4_add_library(bezier
 		BezierQuad.cpp
-		BezierN.cpp
 )
-
-px4_add_unit_gtest(SRC BezierNTest.cpp LINKLIBS bezier)

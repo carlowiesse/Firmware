@@ -39,10 +39,7 @@ import argparse
 import json
 import multiprocessing
 import os
-try:
-    import queue as Queue
-except ImportError:
-    import Queue
+import Queue
 import re
 import shutil
 import subprocess

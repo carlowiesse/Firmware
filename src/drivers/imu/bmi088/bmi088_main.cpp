@@ -90,11 +90,7 @@ start(bool external_bus, enum Rotation rotation, enum sensor_type sensor)
 #endif
 
 		} else {
-#if defined(PX4_SPI_BUS_SENSORS3) && defined(PX4_SPIDEV_BMI088_ACC)
 			*g_dev_acc_ptr = new BMI088_accel(PX4_SPI_BUS_SENSORS3, path_accel, PX4_SPIDEV_BMI088_ACC, rotation);
-#elif defined(PX4_SPI_BUS_5) && defined(PX4_SPIDEV_BMI088_ACC)
-			*g_dev_acc_ptr = new BMI088_accel(PX4_SPI_BUS_5, path_accel, PX4_SPIDEV_BMI088_ACC, rotation);
-#endif
 		}
 
 		if (*g_dev_acc_ptr == nullptr) {
@@ -124,11 +120,7 @@ start(bool external_bus, enum Rotation rotation, enum sensor_type sensor)
 #endif
 
 		} else {
-#if defined(PX4_SPI_BUS_SENSORS3) && defined(PX4_SPIDEV_BMI088_GYR)
 			*g_dev_gyr_ptr = new BMI088_gyro(PX4_SPI_BUS_SENSORS3, path_gyro, PX4_SPIDEV_BMI088_GYR, rotation);
-#elif defined(PX4_SPI_BUS_5) && defined(PX4_SPIDEV_BMI088_GYR)
-			*g_dev_gyr_ptr = new BMI088_gyro(PX4_SPI_BUS_5, path_gyro, PX4_SPIDEV_BMI088_GYR, rotation);
-#endif
 		}
 
 		if (*g_dev_gyr_ptr == nullptr) {

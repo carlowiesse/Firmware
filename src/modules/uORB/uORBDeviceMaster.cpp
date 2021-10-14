@@ -40,12 +40,8 @@
 #include "uORBCommunicator.hpp"
 #endif /* ORB_COMMUNICATOR */
 
-#include <px4_platform_common/sem.hpp>
+#include <px4_sem.hpp>
 #include <systemlib/px4_macros.h>
-
-#ifndef __PX4_QURT // QuRT has no poll()
-#include <poll.h>
-#endif // PX4_QURT
 
 uORB::DeviceMaster::DeviceMaster()
 {
@@ -334,7 +330,7 @@ void uORB::DeviceMaster::showTop(char **topic_filter, int num_filters)
 		PX4_ERR("addNewDeviceNodes failed (%i)", ret);
 	}
 
-#ifdef __PX4_QURT // QuRT has no poll()
+#ifdef __PX4_QURT //QuRT has no poll()
 	only_once = true;
 #else
 	const int stdin_fileno = 0;

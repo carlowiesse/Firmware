@@ -35,8 +35,8 @@
 #define _uORBTest_UnitTest_hpp_
 #include "../uORBCommon.hpp"
 #include "../uORB.h"
-#include <px4_platform_common/time.h>
-#include <px4_platform_common/tasks.h>
+#include <px4_time.h>
+#include <px4_tasks.h>
 #include <unistd.h>
 
 struct orb_test {
@@ -76,16 +76,16 @@ public:
 
 	// Singleton pattern
 	static uORBTest::UnitTest &instance();
-	~UnitTest() = default;
+	~UnitTest() {}
 	int test();
 	template<typename S> int latency_test(orb_id_t T, bool print);
 	int info();
 
-	// Disallow copy
-	UnitTest(const uORBTest::UnitTest & /*unused*/) = delete;
-
 private:
 	UnitTest() : pubsubtest_passed(false), pubsubtest_print(false) {}
+
+	// Disallow copy
+	UnitTest(const uORBTest::UnitTest & /*unused*/) = delete;
 
 	static int pubsubtest_threadEntry(int argc, char *argv[]);
 	int pubsublatency_main();
@@ -148,7 +148,7 @@ int uORBTest::UnitTest::latency_test(orb_id_t T, bool print)
 	int pubsub_task = px4_task_spawn_cmd("uorb_latency",
 					     SCHED_DEFAULT,
 					     SCHED_PRIORITY_MAX,
-					     3000,
+					     2000,
 					     (px4_main_t)&uORBTest::UnitTest::pubsubtest_threadEntry,
 					     args);
 

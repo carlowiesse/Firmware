@@ -35,7 +35,7 @@
  * @file init.c
  *
  * PX4FMU-specific early startup code.  This file implements the
- * board_app_initializ() function that is called early by nsh during startup.
+ * nsh_archinitialize() function that is called early by nsh during startup.
  *
  * Code here is run before the rcS script is invoked; it should start required
  * subsystems and perform board-specific initialization.
@@ -66,14 +66,11 @@
 #include <arch/board/board.h>
 #include "up_internal.h"
 
-#include <px4_arch/io_timer.h>
 #include <drivers/drv_hrt.h>
 #include <drivers/drv_board_led.h>
 #include <systemlib/px4_macros.h>
-#include <px4_platform_common/init.h>
-#include <px4_platform/board_determine_hw_info.h>
-#include <px4_platform/gpio.h>
-#include <px4_platform/board_dma_alloc.h>
+#include <px4_init.h>
+#include <drivers/boards/common/board_dma_alloc.h>
 
 /****************************************************************************
  * Pre-Processor Definitions
@@ -182,9 +179,10 @@ __EXPORT void board_peripheral_reset(int ms)
  ************************************************************************************/
 __EXPORT void board_on_reset(int status)
 {
-	for (int i = 0; i < DIRECT_PWM_OUTPUT_CHANNELS; ++i) {
-		px4_arch_configgpio(PX4_MAKE_GPIO_INPUT(io_timer_channel_get_as_pwm_input(i)));
-	}
+	/* configure the GPIO pins to outputs and keep them low */
+
+	const uint32_t gpio[] = PX4_GPIO_PWM_INIT_LIST;
+	board_gpio_init(gpio, arraySize(gpio));
 
 	if (status >= 0) {
 		up_mdelay(6);
@@ -238,7 +236,7 @@ stm32_boardinitialize(void)
 	/* configure pins */
 
 	const uint32_t gpio[] = PX4_GPIO_INIT_LIST;
-	px4_gpio_init(gpio, arraySize(gpio));
+	board_gpio_init(gpio, arraySize(gpio));
 
 	/* configure SPI interfaces */
 
@@ -283,9 +281,6 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 	VDD_3V3_SD_CARD_EN(true);
 	VDD_3V3_SPEKTRUM_POWER_EN(true);
 
-	/* Need hrt running before using the ADC */
-
-	px4_platform_init();
 
 	if (OK == board_determine_hw_info()) {
 		syslog(LOG_INFO, "[boot] Rev 0x%1x : Ver 0x%1x %s\n", board_get_hw_revision(), board_get_hw_version(),
@@ -294,6 +289,8 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 	} else {
 		syslog(LOG_ERR, "[boot] Failed to read HW revision and version\n");
 	}
+
+	px4_platform_init();
 
 	/* configure the DMA allocator */
 

@@ -45,8 +45,8 @@
  * Included Files
  ****************************************************************************/
 
-#include <px4_platform_common/px4_config.h>
-#include <px4_platform_common/tasks.h>
+#include <px4_config.h>
+#include <px4_tasks.h>
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -73,9 +73,8 @@
 
 #include <systemlib/px4_macros.h>
 
-#include <px4_arch/io_timer.h>
-#include <px4_platform_common/init.h>
-#include <px4_platform/board_dma_alloc.h>
+#include <px4_init.h>
+#include <drivers/boards/common/board_dma_alloc.h>
 
 /****************************************************************************
  * Pre-Processor Definitions
@@ -142,11 +141,14 @@ __EXPORT void board_peripheral_reset(int ms)
 __EXPORT void board_on_reset(int status)
 {
 	// Configure the GPIO pins to outputs and keep them low.
-	for (int i = 0; i < DIRECT_PWM_OUTPUT_CHANNELS; ++i) {
-		px4_arch_configgpio(io_timer_channel_get_gpio_output(i));
-	}
+	stm32_configgpio(GPIO_GPIO0_OUTPUT);
+	stm32_configgpio(GPIO_GPIO1_OUTPUT);
+	stm32_configgpio(GPIO_GPIO2_OUTPUT);
+	stm32_configgpio(GPIO_GPIO3_OUTPUT);
+	stm32_configgpio(GPIO_GPIO4_OUTPUT);
+	stm32_configgpio(GPIO_GPIO5_OUTPUT);
 
-	/*
+	/**
 	 * On resets invoked from system (not boot) insure we establish a low
 	 * output state (discharge the pins) on PWM pins before they become inputs.
 	 */
@@ -191,6 +193,12 @@ stm32_boardinitialize(void)
 	stm32_configgpio(GPIO_VDD_BRICK_VALID);
 	stm32_configgpio(GPIO_VDD_USB_VALID);
 
+	/**
+	 * Start with Sensor voltage off We will enable it
+	 * in board_app_initialize.
+	 */
+	stm32_configgpio(GPIO_VDD_3V3_SENSORS_EN);
+
 	stm32_configgpio(GPIO_SBUS_INV);
 	stm32_configgpio(GPIO_SPEKTRUM_PWR_EN);
 
@@ -201,10 +209,15 @@ stm32_boardinitialize(void)
 	stm32_configgpio(GPIO_BTN_SAFETY);
 	stm32_configgpio(GPIO_PPM_IN);
 
+	int spi_init_mask = SPI_BUS_INIT_MASK;
+
 #if defined(CONFIG_STM32_SPI4)
 
 	/* We have SPI4 is GPIO_PB4 pin 3 Low */
-	if (stm32_gpioread(GPIO_PB4) != 0) {
+	if (stm32_gpioread(GPIO_PB4) == 0) {
+		spi_init_mask |= SPI_BUS_INIT_MASK_EXT;
+
+	} else {
 #endif /* CONFIG_STM32_SPI4 */
 
 		stm32_configgpio(GPIO_PE5);
@@ -215,8 +228,8 @@ stm32_boardinitialize(void)
 
 #endif /* CONFIG_STM32_SPI4 */
 
-	// Configure SPI all interfaces GPIO & enable power.
-	stm32_spiinitialize();
+// Configure SPI all interfaces GPIO.
+	stm32_spiinitialize(spi_init_mask);
 
 	// Configure heater GPIO.
 	stm32_configgpio(GPIO_HEATER_INPUT);
@@ -291,6 +304,9 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 		led_on(LED_RED);
 	}
 
+	// Power up the sensors.
+	stm32_gpiowrite(GPIO_VDD_3V3_SENSORS_EN, 1);
+
 	// Power down the heater.
 	stm32_gpiowrite(GPIO_HEATER_OUTPUT, 0);
 
@@ -308,6 +324,7 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 	SPI_SETFREQUENCY(spi1, 10000000);
 	SPI_SETBITS(spi1, 8);
 	SPI_SETMODE(spi1, SPIDEV_MODE3);
+	SPI_SELECT(spi1, PX4_SPIDEV_GYRO, false);
 	SPI_SELECT(spi1, PX4_SPIDEV_HMC, false);
 	SPI_SELECT(spi1, PX4_SPIDEV_MPU, false);
 	up_udelay(20);

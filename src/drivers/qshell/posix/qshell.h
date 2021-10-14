@@ -40,20 +40,16 @@
 
 #pragma once
 
-#include <px4_platform_common/app.h>
-#include <uORB/Publication.hpp>
-#include <uORB/Subscription.hpp>
-#include <uORB/topics/qshell_req.h>
-#include <uORB/topics/qshell_retval.h>
-
+#include <px4_app.h>
+#include "uORB/topics/qshell_req.h"
 #include <vector>
 #include <string>
 
 class QShell
 {
 public:
-	QShell() = default;
-	~QShell() = default;
+	QShell() {}
+	~QShell() {}
 
 	int main(std::vector<std::string> argList);
 
@@ -63,9 +59,7 @@ private:
 	int _send_cmd(std::vector<std::string> &argList);
 	int _wait_for_retval();
 
-	uORB::Publication<qshell_req_s>	_qshell_req_pub{ORB_ID(qshell_req)};
-
-	uORB::Subscription		_qshell_retval_sub{ORB_ID(qshell_retval)};
-
-	uint32_t			_current_sequence{0};
+	static orb_advert_t _pub_qshell_req;
+	static int _sub_qshell_retval;
+	static uint32_t _current_sequence;
 };

@@ -41,8 +41,8 @@
 
 #include "output.h"
 
-#include <uORB/Publication.hpp>
-#include <uORB/topics/actuator_controls.h>
+#include <uORB/uORB.h>
+
 
 namespace vmount
 {
@@ -56,15 +56,14 @@ class OutputRC : public OutputBase
 {
 public:
 	OutputRC(const OutputConfig &output_config);
-	virtual ~OutputRC() = default;
+	virtual ~OutputRC();
 
 	virtual int update(const ControlData *control_data);
 
 	virtual void print_status();
 
 private:
-	uORB::Publication <actuator_controls_s>	_actuator_controls_pub{ORB_ID(actuator_controls_2)};
-
+	orb_advert_t _actuator_controls_pub = nullptr;
 	bool _retract_gimbal = true;
 };
 

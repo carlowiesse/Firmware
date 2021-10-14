@@ -10,7 +10,6 @@
             "type": "cortex-debug",
             "servertype": "jlink",
             "interface": "swd",
-            //"ipAddress": "server:19020",
             "cwd": "${workspaceRoot}",
             "internalConsoleOptions": "openOnSessionStart",
             "preLaunchCommands": [

@@ -31,112 +31,136 @@
  *
  ****************************************************************************/
 
+/**
+ * @file ADIS16448.cpp
+ */
+
 #include "ADIS16448.h"
 
-#include <px4_platform_common/getopt.h>
-
+/**
+ * Local functions in support of the shell command.
+ */
 namespace adis16448
 {
-ADIS16448 *g_dev{nullptr};
 
-static int start(enum Rotation rotation)
+ADIS16448 *g_dev;
+
+int info();
+int start(enum Rotation rotation);
+int stop();
+void usage();
+
+/**
+ * Start the driver.
+ */
+int
+start(enum Rotation rotation)
 {
 	if (g_dev != nullptr) {
-		PX4_WARN("already started");
-		return 0;
+		// If already started, the still command succeeded.
+		PX4_INFO("already started");
 	}
 
-	// create the driver
+	// Create the driver.
 #if defined(PX4_SPI_BUS_EXT)
 	g_dev = new ADIS16448(PX4_SPI_BUS_EXT, PX4_SPIDEV_EXT_MPU, rotation);
-#elif defined(PX4_SPIDEV_EXTERNAL1_1)
-	g_dev = new ADIS16448(PX4_SPI_BUS_EXTERNAL1, PX4_SPIDEV_EXTERNAL1_1, rotation);
 #else
 	PX4_ERR("External SPI not available");
-	return -1;
 #endif
 
-	if (g_dev == nullptr) {
-		PX4_ERR("driver start failed");
-		return -1;
-	}
+	if (g_dev != nullptr) {
+		if (g_dev->init() == OK) {
+			return PX4_OK;
+		}
 
-	if (g_dev->init() != PX4_OK) {
-		PX4_ERR("driver init failed");
 		delete g_dev;
 		g_dev = nullptr;
-		return -1;
 	}
 
-	return 0;
+	PX4_ERR("driver start failed");
+
+	return PX4_ERROR;
 }
 
-static int stop()
+int stop()
 {
 	if (g_dev == nullptr) {
-		PX4_WARN("driver not running");
-		return -1;
+		PX4_INFO("driver not running");
+
+		return PX4_ERROR;
 	}
 
 	delete g_dev;
 	g_dev = nullptr;
 
-	return 0;
+	return PX4_OK;
 }
 
-static int status()
+/**
+ * Print a little info about the driver.
+ */
+int
+info()
 {
 	if (g_dev == nullptr) {
 		PX4_INFO("driver not running");
-		return 0;
 	}
 
 	g_dev->print_info();
 
-	return 0;
+	return PX4_OK;
 }
 
-static int usage()
+void
+usage()
 {
-	PX4_INFO("missing command: try 'start', 'stop', 'status'");
+	PX4_INFO("missing command: try 'start', 'info', 'stop'");
 	PX4_INFO("options:");
 	PX4_INFO("    -R rotation");
-
-	return 0;
 }
 
-} // namespace adis16448
+} // namespace
 
+
+/**
+ * Driver 'main' command.
+ */
 extern "C" int adis16448_main(int argc, char *argv[])
 {
 	enum Rotation rotation = ROTATION_NONE;
-	int myoptind = 1;
-	int ch = 0;
-	const char *myoptarg = nullptr;
+	int ch;
 
-	// start options
-	while ((ch = px4_getopt(argc, argv, "R:", &myoptind, &myoptarg)) != EOF) {
+	/* start options */
+	while ((ch = getopt(argc, argv, "R:")) != EOF) {
 		switch (ch) {
 		case 'R':
-			rotation = (enum Rotation)atoi(myoptarg);
+			rotation = (enum Rotation)atoi(optarg);
 			break;
 
 		default:
-			return adis16448::usage();
+			adis16448::usage();
+			exit(0);
 		}
 	}
 
-	const char *verb = argv[myoptind];
+	const char *verb = argv[optind];
 
+	// Start/load the driver.
 	if (!strcmp(verb, "start")) {
 		return adis16448::start(rotation);
-
-	} else if (!strcmp(verb, "stop")) {
-		return adis16448::stop();
-
-	} else if (!strcmp(verb, "status")) {
-		return adis16448::status();
 	}
 
-	return adis16448::usage();
+	// Print driver information.
+	if (!strcmp(verb, "info")) {
+		return adis16448::info();
+	}
+
+	// Stop
+	if (!strcmp(verb, "stop")) {
+		return adis16448::stop();
+	}
+
+	adis16448::usage();
+
+	return PX4_OK;
 }

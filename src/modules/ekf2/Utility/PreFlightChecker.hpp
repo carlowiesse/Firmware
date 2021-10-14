@@ -42,7 +42,7 @@
 #pragma once
 
 #include <uORB/topics/vehicle_status.h>
-#include <uORB/topics/estimator_innovations.h>
+#include <uORB/topics/ekf2_innovations.h>
 
 #include <matrix/matrix/math.hpp>
 
@@ -66,7 +66,7 @@ public:
 	 * @param dt the sampling time
 	 * @param innov the ekf2_innovation_s struct containing the current innovations
 	 */
-	void update(float dt, const estimator_innovations_s &innov);
+	void update(float dt, const ekf2_innovations_s &innov);
 
 	/*
 	 * If set to true, the checker will use a less conservative heading innovation check
@@ -76,7 +76,6 @@ public:
 	void setUsingGpsAiding(bool val) { _is_using_gps_aiding = val; }
 	void setUsingFlowAiding(bool val) { _is_using_flow_aiding = val; }
 	void setUsingEvPosAiding(bool val) { _is_using_ev_pos_aiding = val; }
-	void setUsingEvVelAiding(bool val) { _is_using_ev_vel_aiding = val; }
 
 	bool hasHeadingFailed() const { return _has_heading_failed; }
 	bool hasHorizVelFailed() const { return _has_horiz_vel_failed; }
@@ -104,38 +103,36 @@ public:
 	/*
 	 * Check if the innovation fails the test
 	 * To pass the test, the following conditions should be true:
-	 * innov_lpf <= test_limit
-	 * innov <= spike_limit
-	 * @param innov_lpf the low-pass filtered innovation
+	 * innov <= test_limit
+	 * innov_lpf <= 2 * test_limit
 	 * @param innov the current unfiltered innovation
-	 * @param test_limit the magnitude test limit for innov_lpf
-	 * @param spike_limit the magnitude test limit for innov
+	 * @param innov_lpf the low-pass filtered innovation
+	 * @param test_limit the magnitude test limit
 	 * @return true if the check failed the test, false otherwise
 	 */
-	static bool checkInnovFailed(float innov_lpf, float innov, float test_limit, float spike_limit);
+	static bool checkInnovFailed(float innov, float innov_lpf, float test_limit);
 
 	/*
 	 * Check if the a innovation of a 2D vector fails the test
 	 * To pass the test, the following conditions should be true:
-	 * innov_lpf <= test_limit
-	 * innov <= spike_limit
-	 * @param innov_lpf the low-pass filtered innovation
+	 * innov <= test_limit
+	 * innov_lpf <= 2 * test_limit
 	 * @param innov the current unfiltered innovation
-	 * @param test_limit the magnitude test limit for innov_lpf
-	 * @param spike_limit the magnitude test limit for innov
+	 * @param innov_lpf the low-pass filtered innovation
+	 * @param test_limit the magnitude test limit
 	 * @return true if the check failed the test, false otherwise
 	 */
-	static bool checkInnov2DFailed(const Vector2f &innov_lpf, const Vector2f &innov, float test_limit, float spike_limit);
+	static bool checkInnov2DFailed(const Vector2f &innov, const Vector2f &innov_lpf, float test_limit);
 
 	static constexpr float sq(float var) { return var * var; }
 
 private:
-	bool preFlightCheckHeadingFailed(const estimator_innovations_s &innov, float alpha);
+	bool preFlightCheckHeadingFailed(const ekf2_innovations_s &innov, float alpha);
 	float selectHeadingTestLimit();
 
-	bool preFlightCheckHorizVelFailed(const estimator_innovations_s &innov, float alpha);
-	bool preFlightCheckVertVelFailed(const estimator_innovations_s &innov, float alpha);
-	bool preFlightCheckHeightFailed(const estimator_innovations_s &innov, float alpha);
+	bool preFlightCheckHorizVelFailed(const ekf2_innovations_s &innov, float alpha);
+	bool preFlightCheckVertVelFailed(const ekf2_innovations_s &innov, float alpha);
+	bool preFlightCheckHeightFailed(const ekf2_innovations_s &innov, float alpha);
 
 	void resetPreFlightChecks();
 
@@ -148,7 +145,6 @@ private:
 	bool _is_using_gps_aiding{};
 	bool _is_using_flow_aiding{};
 	bool _is_using_ev_pos_aiding{};
-	bool _is_using_ev_vel_aiding{};
 
 	// Low-pass filters for innovation pre-flight checks
 	InnovationLpf _filter_vel_n_innov;	///< Preflight low pass filter N axis velocity innovations (m/sec)
@@ -170,7 +166,7 @@ private:
 	// Maximum permissible yaw innovation to pass pre-flight checks when not aiding inertial nav using NE frame observations (rad)
 	static constexpr float _heading_innov_test_lim = 0.52f;
 	// Maximum permissible flow innovation to pass pre-flight checks
-	static constexpr float _flow_innov_test_lim = 0.25f;
+	static constexpr float _flow_innov_test_lim = 0.1f;
 	// Preflight velocity innovation spike limit (m/sec)
 	static constexpr float _vel_innov_spike_lim = 2.0f * _vel_innov_test_lim;
 	// Preflight position innovation spike limit (m)

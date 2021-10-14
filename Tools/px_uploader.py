@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 ############################################################################
 #
 #   Copyright (c) 2012-2017 PX4 Development Team. All rights reserved.
@@ -405,10 +405,10 @@ class uploader(object):
         deadline = time.time() + 30.0
         while time.time() < deadline:
 
-            usualEraseDuration = 15.0
+            # Draw progress bar (erase usually takes about 9 seconds to complete)
             estimatedTimeRemaining = deadline-time.time()
-            if estimatedTimeRemaining >= usualEraseDuration:
-                self.__drawProgressBar(label, 30.0-estimatedTimeRemaining, usualEraseDuration)
+            if estimatedTimeRemaining >= 9.0:
+                self.__drawProgressBar(label, 30.0-estimatedTimeRemaining, 9.0)
             else:
                 self.__drawProgressBar(label, 10.0, 10.0)
                 sys.stdout.write(" (timeout: %d seconds) " % int(deadline-time.time()))
@@ -733,19 +733,16 @@ def main():
             pyserial_installed = True
     except:
         pass
-
+    
     try:
         if serial.VERSION:
             pyserial_installed = True
     except:
         pass
-
+    
     if not pyserial_installed:
         print("Error: pyserial not installed!")
-        print("")
-        print("You may need to install it using:")
-        print("    pip3 install --user pyserial")
-        print("")
+        print("    (Install using: sudo pip install pyserial)")
         sys.exit(1)
 
     # Load the firmware file

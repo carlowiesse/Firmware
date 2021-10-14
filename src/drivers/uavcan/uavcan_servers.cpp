@@ -31,7 +31,7 @@
  *
  ****************************************************************************/
 
-#include <px4_platform_common/tasks.h>
+#include <px4_tasks.h>
 #include <drivers/drv_hrt.h>
 
 #include <nuttx/config.h>
@@ -44,8 +44,9 @@
 #include <mathlib/mathlib.h>
 #include <systemlib/err.h>
 #include <parameters/param.h>
+#include <lib/mixer/mixer.h>
 #include <version/version.h>
-
+#include <arch/board/board.h>
 #include <arch/chip/chip.h>
 
 #include "uavcan_main.hpp"
@@ -59,6 +60,10 @@
 #include <uORB/topics/vehicle_command.h>
 #include <uORB/topics/vehicle_command_ack.h>
 #include <uORB/topics/uavcan_parameter_request.h>
+#include <uORB/topics/uavcan_parameter_value.h>
+
+#include <v2.0/common/mavlink.h>
+
 
 /**
  * @file uavcan_servers.cpp
@@ -73,8 +78,8 @@
  * UavcanNode
  */
 UavcanServers *UavcanServers::_instance;
-
 UavcanServers::UavcanServers(uavcan::INode &main_node) :
+	_subnode_thread(-1),
 	_vdriver(NumIfaces, UAVCAN_DRIVER::SystemClock::instance(), main_node.getAllocator(), VirtualIfaceBlockAllocationQuota),
 	_subnode(_vdriver, UAVCAN_DRIVER::SystemClock::instance(), main_node.getAllocator()),
 	_main_node(main_node),
@@ -91,6 +96,7 @@ UavcanServers::UavcanServers(uavcan::INode &main_node) :
 	_enumeration_client(_subnode),
 	_enumeration_getset_client(_subnode),
 	_enumeration_save_client(_subnode)
+
 {
 }
 
@@ -103,18 +109,17 @@ UavcanServers::~UavcanServers()
 	_main_node.getDispatcher().removeRxFrameListener();
 }
 
-int
-UavcanServers::stop()
+int UavcanServers::stop()
 {
 	UavcanServers *server = instance();
 
 	if (server == nullptr) {
-		PX4_INFO("Already stopped");
+		warnx("Already stopped");
 		return -1;
 	}
 
 	if (server->_subnode_thread) {
-		PX4_INFO("stopping fw srv thread...");
+		warnx("stopping fw srv thread...");
 		server->_subnode_thread_should_exit = true;
 		(void)pthread_join(server->_subnode_thread, NULL);
 	}
@@ -127,11 +132,10 @@ UavcanServers::stop()
 	return 0;
 }
 
-int
-UavcanServers::start(uavcan::INode &main_node)
+int UavcanServers::start(uavcan::INode &main_node)
 {
 	if (_instance != nullptr) {
-		PX4_INFO("Already started");
+		warnx("Already started");
 		return -1;
 	}
 
@@ -141,14 +145,14 @@ UavcanServers::start(uavcan::INode &main_node)
 	_instance = new UavcanServers(main_node);
 
 	if (_instance == nullptr) {
-		PX4_ERR("Out of memory");
+		warnx("Out of memory");
 		return -2;
 	}
 
-	int rv = _instance->init();
+	int rv  = _instance->init();
 
 	if (rv < 0) {
-		PX4_ERR("Node init failed: %d", rv);
+		warnx("Node init failed: %d", rv);
 		delete _instance;
 		_instance = nullptr;
 		return rv;
@@ -166,7 +170,7 @@ UavcanServers::start(uavcan::INode &main_node)
 	param.sched_priority = Priority;
 
 	if (pthread_attr_setschedparam(&tattr, &param)) {
-		PX4_ERR("setting sched params failed");
+		warnx("setting sched params failed");
 	}
 
 	static auto run_trampoline = [](void *) {return UavcanServers::_instance->run(_instance);};
@@ -175,7 +179,7 @@ UavcanServers::start(uavcan::INode &main_node)
 
 	if (rv != 0) {
 		rv = -rv;
-		PX4_ERR("pthread_create() failed: %d", rv);
+		warnx("pthread_create() failed: %d", rv);
 		delete _instance;
 		_instance = nullptr;
 	}
@@ -183,8 +187,7 @@ UavcanServers::start(uavcan::INode &main_node)
 	return rv;
 }
 
-int
-UavcanServers::init()
+int UavcanServers::init()
 {
 	errno = 0;
 
@@ -192,10 +195,11 @@ UavcanServers::init()
 	 * Initialize the mutex.
 	 * giving it its path
 	 */
+
 	int ret = Lock::init(_subnode_mutex);
 
 	if (ret < 0) {
-		PX4_ERR("Lock init: %d", errno);
+		warnx("Lock init: %d", errno);
 		return ret;
 	}
 
@@ -204,6 +208,7 @@ UavcanServers::init()
 	_subnode.setNodeID(_main_node.getNodeID());
 	_main_node.getDispatcher().installRxFrameListener(&_vdriver);
 
+
 	/*
 	 * Initialize the fw version checker.
 	 * giving it its path
@@ -211,7 +216,7 @@ UavcanServers::init()
 	ret = _fw_version_checker.createFwPaths(UAVCAN_FIRMWARE_PATH);
 
 	if (ret < 0) {
-		PX4_ERR("FirmwareVersionChecker init: %d, errno: %d", ret, errno);
+		warnx("FirmwareVersionChecker init: %d, errno: %d", ret, errno);
 		return ret;
 	}
 
@@ -220,7 +225,7 @@ UavcanServers::init()
 	ret = _fw_server.start();
 
 	if (ret < 0) {
-		PX4_ERR("BasicFileServer init: %d, errno: %d", ret, errno);
+		warnx("BasicFileServer init: %d, errno: %d", ret, errno);
 		return ret;
 	}
 
@@ -229,7 +234,7 @@ UavcanServers::init()
 	ret = _storage_backend.init(UAVCAN_NODE_DB_PATH);
 
 	if (ret < 0) {
-		PX4_ERR("FileStorageBackend init: %d, errno: %d", ret, errno);
+		warnx("FileStorageBackend init: %d, errno: %d", ret, errno);
 		return ret;
 	}
 
@@ -238,7 +243,7 @@ UavcanServers::init()
 	ret = _tracer.init(UAVCAN_LOG_FILE);
 
 	if (ret < 0) {
-		PX4_ERR("FileEventTracer init: %d, errno: %d", ret, errno);
+		warnx("FileEventTracer init: %d, errno: %d", ret, errno);
 		return ret;
 	}
 
@@ -250,32 +255,34 @@ UavcanServers::init()
 	ret = _server_instance.init(hwver.unique_id);
 
 	if (ret < 0) {
-		PX4_ERR("CentralizedServer init: %d", ret);
+		warnx("CentralizedServer init: %d", ret);
 		return ret;
 	}
 
 	/* Start node info retriever to fetch node info from new nodes */
+
 	ret = _node_info_retriever.start();
 
 	if (ret < 0) {
-		PX4_ERR("NodeInfoRetriever init: %d", ret);
+		warnx("NodeInfoRetriever init: %d", ret);
 		return ret;
 	}
 
 	/* Start the fw version checker   */
+
 	ret = _fw_upgrade_trigger.start(_node_info_retriever, _fw_version_checker.getFirmwarePath());
 
 	if (ret < 0) {
-		PX4_ERR("FirmwareUpdateTrigger init: %d", ret);
+		warnx("FirmwareUpdateTrigger init: %d", ret);
 		return ret;
 	}
 
 	/*  Start the Node   */
+
 	return 0;
 }
 
-pthread_addr_t
-UavcanServers::run(pthread_addr_t)
+pthread_addr_t UavcanServers::run(pthread_addr_t)
 {
 	prctl(PR_SET_NAME, "uavcan fw srv", 0);
 
@@ -289,9 +296,9 @@ UavcanServers::run(pthread_addr_t)
 
 	/* the subscribe call needs to happen in the same thread,
 	 * so not in the constructor */
-	uORB::Subscription armed_sub{ORB_ID(actuator_armed)};
-	uORB::Subscription vcmd_sub{ORB_ID(vehicle_command)};
-	uORB::Subscription param_request_sub{ORB_ID(uavcan_parameter_request)};
+	int cmd_sub = orb_subscribe(ORB_ID(vehicle_command));
+	int param_request_sub = orb_subscribe(ORB_ID(uavcan_parameter_request));
+	int armed_sub = orb_subscribe(ORB_ID(actuator_armed));
 
 	/* Set up shared service clients */
 	_param_getset_client.setCallback(GetSetCallback(this, &UavcanServers::cb_getset));
@@ -319,20 +326,23 @@ UavcanServers::run(pthread_addr_t)
 		const int spin_res = _subnode.spin(uavcan::MonotonicDuration::fromMSec(10));
 
 		if (spin_res < 0) {
-			PX4_ERR("node spin error %i", spin_res);
+			warnx("node spin error %i", spin_res);
 		}
 
 		// Check for parameter requests (get/set/list)
-		if (param_request_sub.updated() && !_param_list_in_progress && !_param_in_progress && !_count_in_progress) {
-			uavcan_parameter_request_s request{};
-			param_request_sub.copy(&request);
+		bool param_request_ready;
+		orb_check(param_request_sub, &param_request_ready);
+
+		if (param_request_ready && !_param_list_in_progress && !_param_in_progress && !_count_in_progress) {
+			struct uavcan_parameter_request_s request;
+			orb_copy(ORB_ID(uavcan_parameter_request), param_request_sub, &request);
 
 			if (_param_counts[request.node_id]) {
 				/*
 				 * We know how many parameters are exposed by this node, so
 				 * process the request.
 				 */
-				if (request.message_type == uavcan_parameter_request_s::MESSAGE_TYPE_PARAM_REQUEST_READ) {
+				if (request.message_type == MAVLINK_MSG_ID_PARAM_REQUEST_READ) {
 					uavcan::protocol::param::GetSet::Request req;
 
 					if (request.param_index >= 0) {
@@ -345,14 +355,14 @@ UavcanServers::run(pthread_addr_t)
 					int call_res = _param_getset_client.call(request.node_id, req);
 
 					if (call_res < 0) {
-						PX4_ERR("UAVCAN command bridge: couldn't send GetSet: %d", call_res);
+						warnx("UAVCAN command bridge: couldn't send GetSet: %d", call_res);
 
 					} else {
 						_param_in_progress = true;
 						_param_index = request.param_index;
 					}
 
-				} else if (request.message_type == uavcan_parameter_request_s::MESSAGE_TYPE_PARAM_SET) {
+				} else if (request.message_type == MAVLINK_MSG_ID_PARAM_SET) {
 					uavcan::protocol::param::GetSet::Request req;
 
 					if (request.param_index >= 0) {
@@ -362,10 +372,10 @@ UavcanServers::run(pthread_addr_t)
 						req.name = (char *)request.param_id;
 					}
 
-					if (request.param_type == uavcan_parameter_request_s::PARAM_TYPE_REAL32) {
+					if (request.param_type == MAV_PARAM_TYPE_REAL32) {
 						req.value.to<uavcan::protocol::param::Value::Tag::real_value>() = request.real_value;
 
-					} else if (request.param_type == uavcan_parameter_request_s::PARAM_TYPE_UINT8) {
+					} else if (request.param_type == MAV_PARAM_TYPE_UINT8) {
 						req.value.to<uavcan::protocol::param::Value::Tag::boolean_value>() = request.int_value;
 
 					} else {
@@ -378,25 +388,25 @@ UavcanServers::run(pthread_addr_t)
 					int call_res = _param_getset_client.call(request.node_id, req);
 
 					if (call_res < 0) {
-						PX4_ERR("UAVCAN command bridge: couldn't send GetSet: %d", call_res);
+						warnx("UAVCAN command bridge: couldn't send GetSet: %d", call_res);
 
 					} else {
 						_param_in_progress = true;
 						_param_index = request.param_index;
 					}
 
-				} else if (request.message_type == uavcan_parameter_request_s::MESSAGE_TYPE_PARAM_REQUEST_LIST) {
+				} else if (request.message_type == MAVLINK_MSG_ID_PARAM_REQUEST_LIST) {
 					// This triggers the _param_list_in_progress case below.
 					_param_index = 0;
 					_param_list_in_progress = true;
 					_param_list_node_id = request.node_id;
 					_param_list_all_nodes = false;
 
-					PX4_INFO("UAVCAN command bridge: starting component-specific param list");
+					warnx("UAVCAN command bridge: starting component-specific param list");
 				}
 
-			} else if (request.node_id == uavcan_parameter_request_s::NODE_ID_ALL) {
-				if (request.message_type == uavcan_parameter_request_s::MESSAGE_TYPE_PARAM_REQUEST_LIST) {
+			} else if (request.node_id == MAV_COMP_ID_ALL) {
+				if (request.message_type == MAVLINK_MSG_ID_PARAM_REQUEST_LIST) {
 					/*
 					 * This triggers the _param_list_in_progress case below,
 					 * but additionally iterates over all active nodes.
@@ -406,7 +416,7 @@ UavcanServers::run(pthread_addr_t)
 					_param_list_node_id = get_next_active_node_id(0);
 					_param_list_all_nodes = true;
 
-					PX4_INFO("UAVCAN command bridge: starting global param list with node %hhu", _param_list_node_id);
+					warnx("UAVCAN command bridge: starting global param list with node %hhu", _param_list_node_id);
 
 					if (_param_counts[_param_list_node_id] == 0) {
 						param_count(_param_list_node_id);
@@ -425,7 +435,7 @@ UavcanServers::run(pthread_addr_t)
 		// Handle parameter listing index/node ID advancement
 		if (_param_list_in_progress && !_param_in_progress && !_count_in_progress) {
 			if (_param_index >= _param_counts[_param_list_node_id]) {
-				PX4_INFO("UAVCAN command bridge: completed param list for node %hhu", _param_list_node_id);
+				warnx("UAVCAN command bridge: completed param list for node %hhu", _param_list_node_id);
 				// Reached the end of the current node's parameter set.
 				_param_list_in_progress = false;
 
@@ -447,7 +457,7 @@ UavcanServers::run(pthread_addr_t)
 						// Keep on listing.
 						_param_index = 0;
 						_param_list_in_progress = true;
-						PX4_INFO("UAVCAN command bridge: started param list for node %hhu", _param_list_node_id);
+						warnx("UAVCAN command bridge: started param list for node %hhu", _param_list_node_id);
 					}
 				}
 			}
@@ -464,7 +474,7 @@ UavcanServers::run(pthread_addr_t)
 
 			if (call_res < 0) {
 				_param_list_in_progress = false;
-				PX4_ERR("UAVCAN command bridge: couldn't send param list GetSet: %d", call_res);
+				warnx("UAVCAN command bridge: couldn't send param list GetSet: %d", call_res);
 
 			} else {
 				_param_in_progress = true;
@@ -472,9 +482,12 @@ UavcanServers::run(pthread_addr_t)
 		}
 
 		// Check for ESC enumeration commands
-		if (vcmd_sub.updated() && !_cmd_in_progress) {
-			vehicle_command_s cmd{};
-			vcmd_sub.copy(&cmd);
+		bool cmd_ready;
+		orb_check(cmd_sub, &cmd_ready);
+
+		if (cmd_ready && !_cmd_in_progress) {
+			struct vehicle_command_s cmd;
+			orb_copy(ORB_ID(vehicle_command), cmd_sub, &cmd);
 
 			uint8_t cmd_ack_result = vehicle_command_ack_s::VEHICLE_RESULT_ACCEPTED;
 
@@ -483,7 +496,7 @@ UavcanServers::run(pthread_addr_t)
 				int node_id = static_cast<int>(cmd.param2 + 0.5f);
 				int call_res;
 
-				PX4_INFO("UAVCAN command bridge: received UAVCAN command ID %d, node ID %d", command_id, node_id);
+				warnx("UAVCAN command bridge: received UAVCAN command ID %d, node ID %d", command_id, node_id);
 
 				switch (command_id) {
 				case 0:
@@ -499,7 +512,7 @@ UavcanServers::run(pthread_addr_t)
 						call_res = _enumeration_client.call(get_next_active_node_id(0), req);
 
 						if (call_res < 0) {
-							PX4_ERR("UAVCAN ESC enumeration: couldn't send initial Begin request: %d", call_res);
+							warnx("UAVCAN ESC enumeration: couldn't send initial Begin request: %d", call_res);
 							beep(BeepFrequencyError);
 							cmd_ack_result = vehicle_command_ack_s::VEHICLE_RESULT_FAILED;
 
@@ -511,7 +524,7 @@ UavcanServers::run(pthread_addr_t)
 					}
 
 				default: {
-						PX4_ERR("UAVCAN command bridge: unknown command ID %d", command_id);
+						warnx("UAVCAN command bridge: unknown command ID %d", command_id);
 						cmd_ack_result = vehicle_command_ack_s::VEHICLE_RESULT_UNSUPPORTED;
 						break;
 					}
@@ -520,7 +533,7 @@ UavcanServers::run(pthread_addr_t)
 			} else if (cmd.command == vehicle_command_s::VEHICLE_CMD_PREFLIGHT_STORAGE) {
 				int command_id = static_cast<int>(cmd.param1 + 0.5f);
 
-				PX4_INFO("UAVCAN command bridge: received storage command ID %d", command_id);
+				warnx("UAVCAN command bridge: received storage command ID %d", command_id);
 
 				switch (command_id) {
 				case 1: {
@@ -563,12 +576,15 @@ UavcanServers::run(pthread_addr_t)
 
 		// Shut down once armed
 		// TODO (elsewhere): start up again once disarmed?
-		if (armed_sub.updated()) {
-			actuator_armed_s armed{};
-			armed_sub.copy(&armed);
+		bool updated;
+		orb_check(armed_sub, &updated);
+
+		if (updated) {
+			struct actuator_armed_s armed;
+			orb_copy(ORB_ID(actuator_armed), armed_sub, &armed);
 
 			if (armed.armed && !(armed.lockdown || armed.manual_lockdown)) {
-				PX4_INFO("UAVCAN command bridge: system armed, exiting now.");
+				warnx("UAVCAN command bridge: system armed, exiting now.");
 				break;
 			}
 		}
@@ -576,12 +592,11 @@ UavcanServers::run(pthread_addr_t)
 
 	_subnode_thread_should_exit = false;
 
-	PX4_INFO("exiting");
+	warnx("exiting");
 	return (pthread_addr_t) 0;
 }
 
-void
-UavcanServers::cb_getset(const uavcan::ServiceCallResult<uavcan::protocol::param::GetSet> &result)
+void UavcanServers::cb_getset(const uavcan::ServiceCallResult<uavcan::protocol::param::GetSet> &result)
 {
 	if (_count_in_progress) {
 		/*
@@ -607,14 +622,14 @@ UavcanServers::cb_getset(const uavcan::ServiceCallResult<uavcan::protocol::param
 				if (call_res < 0) {
 					_count_in_progress = false;
 					_count_index = 0;
-					PX4_ERR("UAVCAN command bridge: couldn't send GetSet during param count: %d", call_res);
+					warnx("UAVCAN command bridge: couldn't send GetSet during param count: %d", call_res);
 					beep(BeepFrequencyError);
 				}
 
 			} else {
 				_count_in_progress = false;
 				_count_index = 0;
-				PX4_INFO("UAVCAN command bridge: completed param count for node %hhu: %hhu", node_id, _param_counts[node_id]);
+				warnx("UAVCAN command bridge: completed param count for node %hhu: %hhu", node_id, _param_counts[node_id]);
 				beep(BeepFrequencyGenericIndication);
 			}
 
@@ -622,7 +637,7 @@ UavcanServers::cb_getset(const uavcan::ServiceCallResult<uavcan::protocol::param
 			_param_counts[node_id] = 0;
 			_count_in_progress = false;
 			_count_index = 0;
-			PX4_ERR("UAVCAN command bridge: GetSet error during param count");
+			warnx("UAVCAN command bridge: GetSet error during param count");
 		}
 
 	} else {
@@ -642,22 +657,27 @@ UavcanServers::cb_getset(const uavcan::ServiceCallResult<uavcan::protocol::param
 			response.param_count = _param_counts[response.node_id];
 
 			if (param.value.is(uavcan::protocol::param::Value::Tag::integer_value)) {
-				response.param_type = uavcan_parameter_request_s::PARAM_TYPE_INT64;
+				response.param_type = MAV_PARAM_TYPE_INT64;
 				response.int_value = param.value.to<uavcan::protocol::param::Value::Tag::integer_value>();
 
 			} else if (param.value.is(uavcan::protocol::param::Value::Tag::real_value)) {
-				response.param_type = uavcan_parameter_request_s::PARAM_TYPE_REAL32;
+				response.param_type = MAV_PARAM_TYPE_REAL32;
 				response.real_value = param.value.to<uavcan::protocol::param::Value::Tag::real_value>();
 
 			} else if (param.value.is(uavcan::protocol::param::Value::Tag::boolean_value)) {
-				response.param_type = uavcan_parameter_request_s::PARAM_TYPE_UINT8;
+				response.param_type = MAV_PARAM_TYPE_UINT8;
 				response.int_value = param.value.to<uavcan::protocol::param::Value::Tag::boolean_value>();
 			}
 
-			_param_response_pub.publish(response);
+			if (_param_response_pub == nullptr) {
+				_param_response_pub = orb_advertise(ORB_ID(uavcan_parameter_value), &response);
+
+			} else {
+				orb_publish(ORB_ID(uavcan_parameter_value), _param_response_pub, &response);
+			}
 
 		} else {
-			PX4_ERR("UAVCAN command bridge: GetSet error");
+			warnx("UAVCAN command bridge: GetSet error");
 		}
 
 		_param_in_progress = false;
@@ -665,41 +685,38 @@ UavcanServers::cb_getset(const uavcan::ServiceCallResult<uavcan::protocol::param
 	}
 }
 
-void
-UavcanServers::param_count(uavcan::NodeID node_id)
+void UavcanServers::param_count(uavcan::NodeID node_id)
 {
 	uavcan::protocol::param::GetSet::Request req;
 	req.index = 0;
 	int call_res = _param_getset_client.call(node_id, req);
 
 	if (call_res < 0) {
-		PX4_ERR("UAVCAN command bridge: couldn't start parameter count: %d", call_res);
+		warnx("UAVCAN command bridge: couldn't start parameter count: %d", call_res);
 
 	} else {
 		_count_in_progress = true;
 		_count_index = 0;
-		PX4_INFO("UAVCAN command bridge: starting param count");
+		warnx("UAVCAN command bridge: starting param count");
 	}
 }
 
-void
-UavcanServers::param_opcode(uavcan::NodeID node_id)
+void UavcanServers::param_opcode(uavcan::NodeID node_id)
 {
 	uavcan::protocol::param::ExecuteOpcode::Request opcode_req;
 	opcode_req.opcode = _param_save_opcode;
 	int call_res = _param_opcode_client.call(node_id, opcode_req);
 
 	if (call_res < 0) {
-		PX4_ERR("UAVCAN command bridge: couldn't send ExecuteOpcode: %d", call_res);
+		warnx("UAVCAN command bridge: couldn't send ExecuteOpcode: %d", call_res);
 
 	} else {
 		_cmd_in_progress = true;
-		PX4_INFO("UAVCAN command bridge: sent ExecuteOpcode");
+		warnx("UAVCAN command bridge: sent ExecuteOpcode");
 	}
 }
 
-void
-UavcanServers::cb_opcode(const uavcan::ServiceCallResult<uavcan::protocol::param::ExecuteOpcode> &result)
+void UavcanServers::cb_opcode(const uavcan::ServiceCallResult<uavcan::protocol::param::ExecuteOpcode> &result)
 {
 	bool success = result.isSuccessful();
 	uint8_t node_id = result.getCallID().server_node_id.get();
@@ -708,23 +725,23 @@ UavcanServers::cb_opcode(const uavcan::ServiceCallResult<uavcan::protocol::param
 	_cmd_in_progress = false;
 
 	if (!result.isSuccessful()) {
-		PX4_ERR("UAVCAN command bridge: save request for node %hhu timed out.", node_id);
+		warnx("UAVCAN command bridge: save request for node %hhu timed out.", node_id);
 
 	} else if (!result.getResponse().ok) {
-		PX4_ERR("UAVCAN command bridge: save request for node %hhu rejected.", node_id);
+		warnx("UAVCAN command bridge: save request for node %hhu rejected.", node_id);
 
 	} else {
-		PX4_INFO("UAVCAN command bridge: save request for node %hhu completed OK, restarting.", node_id);
+		warnx("UAVCAN command bridge: save request for node %hhu completed OK, restarting.", node_id);
 
 		uavcan::protocol::RestartNode::Request restart_req;
 		restart_req.magic_number = restart_req.MAGIC_NUMBER;
 		int call_res = _param_restartnode_client.call(node_id, restart_req);
 
 		if (call_res < 0) {
-			PX4_ERR("UAVCAN command bridge: couldn't send RestartNode: %d", call_res);
+			warnx("UAVCAN command bridge: couldn't send RestartNode: %d", call_res);
 
 		} else {
-			PX4_ERR("UAVCAN command bridge: sent RestartNode");
+			warnx("UAVCAN command bridge: sent RestartNode");
 			_cmd_in_progress = true;
 		}
 	}
@@ -744,8 +761,7 @@ UavcanServers::cb_opcode(const uavcan::ServiceCallResult<uavcan::protocol::param
 	}
 }
 
-void
-UavcanServers::cb_restart(const uavcan::ServiceCallResult<uavcan::protocol::RestartNode> &result)
+void UavcanServers::cb_restart(const uavcan::ServiceCallResult<uavcan::protocol::RestartNode> &result)
 {
 	bool success = result.isSuccessful();
 	uint8_t node_id = result.getCallID().server_node_id.get();
@@ -754,13 +770,12 @@ UavcanServers::cb_restart(const uavcan::ServiceCallResult<uavcan::protocol::Rest
 	_cmd_in_progress = false;
 
 	if (success) {
-		PX4_INFO("UAVCAN command bridge: restart request for node %hhu completed OK.", node_id);
-
+		warnx("UAVCAN command bridge: restart request for node %hhu completed OK.", node_id);
 		// Clear the dirty flag
 		clear_node_params_dirty(node_id);
 
 	} else {
-		PX4_ERR("UAVCAN command bridge: restart request for node %hhu failed.", node_id);
+		warnx("UAVCAN command bridge: restart request for node %hhu failed.", node_id);
 	}
 
 	// Get the next dirty node ID and send the same command to it
@@ -771,8 +786,7 @@ UavcanServers::cb_restart(const uavcan::ServiceCallResult<uavcan::protocol::Rest
 	}
 }
 
-uint8_t
-UavcanServers::get_next_active_node_id(uint8_t base)
+uint8_t UavcanServers::get_next_active_node_id(uint8_t base)
 {
 	base++;
 
@@ -782,8 +796,7 @@ UavcanServers::get_next_active_node_id(uint8_t base)
 	return base;
 }
 
-uint8_t
-UavcanServers::get_next_dirty_node_id(uint8_t base)
+uint8_t UavcanServers::get_next_dirty_node_id(uint8_t base)
 {
 	base++;
 
@@ -792,8 +805,7 @@ UavcanServers::get_next_dirty_node_id(uint8_t base)
 	return base;
 }
 
-void
-UavcanServers::beep(float frequency)
+void UavcanServers::beep(float frequency)
 {
 	uavcan::equipment::indication::BeepCommand cmd;
 	cmd.frequency = frequency;
@@ -801,21 +813,20 @@ UavcanServers::beep(float frequency)
 	(void)_beep_pub.broadcast(cmd);
 }
 
-void
-UavcanServers::cb_enumeration_begin(const uavcan::ServiceCallResult<uavcan::protocol::enumeration::Begin> &result)
+void UavcanServers::cb_enumeration_begin(const uavcan::ServiceCallResult<uavcan::protocol::enumeration::Begin> &result)
 {
 	uint8_t next_id = get_next_active_node_id(result.getCallID().server_node_id.get());
 
 	if (!result.isSuccessful()) {
-		PX4_ERR("UAVCAN ESC enumeration: begin request for node %hhu timed out.", result.getCallID().server_node_id.get());
+		warnx("UAVCAN ESC enumeration: begin request for node %hhu timed out.", result.getCallID().server_node_id.get());
 
 	} else if (result.getResponse().error) {
-		PX4_ERR("UAVCAN ESC enumeration: begin request for node %hhu rejected: %hhu", result.getCallID().server_node_id.get(),
-			result.getResponse().error);
+		warnx("UAVCAN ESC enumeration: begin request for node %hhu rejected: %hhu", result.getCallID().server_node_id.get(),
+		      result.getResponse().error);
 
 	} else {
 		_esc_count++;
-		PX4_INFO("UAVCAN ESC enumeration: begin request for node %hhu completed OK.", result.getCallID().server_node_id.get());
+		warnx("UAVCAN ESC enumeration: begin request for node %hhu completed OK.", result.getCallID().server_node_id.get());
 	}
 
 	if (next_id < 128) {
@@ -829,23 +840,22 @@ UavcanServers::cb_enumeration_begin(const uavcan::ServiceCallResult<uavcan::prot
 		int call_res = _enumeration_client.call(next_id, req);
 
 		if (call_res < 0) {
-			PX4_ERR("UAVCAN ESC enumeration: couldn't send Begin request: %d", call_res);
+			warnx("UAVCAN ESC enumeration: couldn't send Begin request: %d", call_res);
 
 		} else {
-			PX4_INFO("UAVCAN ESC enumeration: sent Begin request");
+			warnx("UAVCAN ESC enumeration: sent Begin request");
 		}
 
 	} else {
-		PX4_INFO("UAVCAN ESC enumeration: begun enumeration on all nodes.");
+		warnx("UAVCAN ESC enumeration: begun enumeration on all nodes.");
 	}
 }
 
-void
-UavcanServers::cb_enumeration_indication(const uavcan::ReceivedDataStructure<uavcan::protocol::enumeration::Indication>
-		&msg)
+void UavcanServers::cb_enumeration_indication(const
+		uavcan::ReceivedDataStructure<uavcan::protocol::enumeration::Indication> &msg)
 {
 	// Called whenever an ESC thinks it has received user input.
-	PX4_INFO("UAVCAN ESC enumeration: got indication");
+	warnx("UAVCAN ESC enumeration: got indication");
 
 	if (!_esc_enumeration_active) {
 		// Ignore any messages received when we're not expecting them
@@ -857,33 +867,33 @@ UavcanServers::cb_enumeration_indication(const uavcan::ReceivedDataStructure<uav
 
 	for (; i < _esc_enumeration_index; i++) {
 		if (_esc_enumeration_ids[i] == msg.getSrcNodeID().get()) {
-			PX4_INFO("UAVCAN ESC enumeration: already enumerated ESC ID %hhu as index %d, ignored", _esc_enumeration_ids[i], i);
+			warnx("UAVCAN ESC enumeration: already enumerated ESC ID %hhu as index %d, ignored", _esc_enumeration_ids[i], i);
 			return;
 		}
 	}
 
 	uavcan::protocol::param::GetSet::Request req;
-	req.name = msg.parameter_name;	// 'esc_index' or something alike, the name is not standardized
+	req.name =
+		msg.parameter_name;                                           // 'esc_index' or something alike, the name is not standardized
 	req.value.to<uavcan::protocol::param::Value::Tag::integer_value>() = i;
 
 	int call_res = _enumeration_getset_client.call(msg.getSrcNodeID(), req);
 
 	if (call_res < 0) {
-		PX4_ERR("UAVCAN ESC enumeration: couldn't send GetSet: %d", call_res);
+		warnx("UAVCAN ESC enumeration: couldn't send GetSet: %d", call_res);
 
 	} else {
-		PX4_INFO("UAVCAN ESC enumeration: sent GetSet to node %hhu (index %d)", _esc_enumeration_ids[i], i);
+		warnx("UAVCAN ESC enumeration: sent GetSet to node %hhu (index %d)", _esc_enumeration_ids[i], i);
 	}
 }
 
-void
-UavcanServers::cb_enumeration_getset(const uavcan::ServiceCallResult<uavcan::protocol::param::GetSet> &result)
+void UavcanServers::cb_enumeration_getset(const uavcan::ServiceCallResult<uavcan::protocol::param::GetSet> &result)
 {
 	if (!result.isSuccessful()) {
-		PX4_ERR("UAVCAN ESC enumeration: save request for node %hhu timed out.", result.getCallID().server_node_id.get());
+		warnx("UAVCAN ESC enumeration: save request for node %hhu timed out.", result.getCallID().server_node_id.get());
 
 	} else {
-		PX4_INFO("UAVCAN ESC enumeration: save request for node %hhu completed OK.", result.getCallID().server_node_id.get());
+		warnx("UAVCAN ESC enumeration: save request for node %hhu completed OK.", result.getCallID().server_node_id.get());
 
 		uavcan::protocol::param::GetSet::Response resp = result.getResponse();
 		uint8_t esc_index = (uint8_t)resp.value.to<uavcan::protocol::param::Value::Tag::integer_value>();
@@ -897,43 +907,41 @@ UavcanServers::cb_enumeration_getset(const uavcan::ServiceCallResult<uavcan::pro
 		int call_res = _enumeration_save_client.call(result.getCallID().server_node_id, opcode_req);
 
 		if (call_res < 0) {
-			PX4_ERR("UAVCAN ESC enumeration: couldn't send ExecuteOpcode: %d", call_res);
+			warnx("UAVCAN ESC enumeration: couldn't send ExecuteOpcode: %d", call_res);
 
 		} else {
-			PX4_INFO("UAVCAN ESC enumeration: sent ExecuteOpcode to node %hhu (index %hhu)", _esc_enumeration_ids[esc_index],
-				 esc_index);
+			warnx("UAVCAN ESC enumeration: sent ExecuteOpcode to node %hhu (index %hhu)", _esc_enumeration_ids[esc_index],
+			      esc_index);
 		}
 	}
 }
 
-void
-UavcanServers::cb_enumeration_save(const uavcan::ServiceCallResult<uavcan::protocol::param::ExecuteOpcode> &result)
+void UavcanServers::cb_enumeration_save(const uavcan::ServiceCallResult<uavcan::protocol::param::ExecuteOpcode> &result)
 {
 	const bool this_is_the_last_one =
-		(_esc_enumeration_index >= uavcan::equipment::esc::RawCommand::FieldTypes::cmd::MaxSize - 1) ||
-		(_esc_enumeration_index >= _esc_count);
+		_esc_enumeration_index >= uavcan::equipment::esc::RawCommand::FieldTypes::cmd::MaxSize - 1 ||
+		_esc_enumeration_index >= _esc_count;
 
 	if (!result.isSuccessful()) {
-		PX4_ERR("UAVCAN ESC enumeration: save request for node %hhu timed out.", result.getCallID().server_node_id.get());
+		warnx("UAVCAN ESC enumeration: save request for node %hhu timed out.", result.getCallID().server_node_id.get());
 		beep(BeepFrequencyError);
 
 	} else if (!result.getResponse().ok) {
-		PX4_ERR("UAVCAN ESC enumeration: save request for node %hhu rejected", result.getCallID().server_node_id.get());
+		warnx("UAVCAN ESC enumeration: save request for node %hhu rejected", result.getCallID().server_node_id.get());
 		beep(BeepFrequencyError);
 
 	} else {
-		PX4_INFO("UAVCAN ESC enumeration: save request for node %hhu completed OK.", result.getCallID().server_node_id.get());
+		warnx("UAVCAN ESC enumeration: save request for node %hhu completed OK.", result.getCallID().server_node_id.get());
 		beep(this_is_the_last_one ? BeepFrequencySuccess : BeepFrequencyGenericIndication);
 	}
 
-	PX4_INFO("UAVCAN ESC enumeration: completed %hhu of %hhu", _esc_enumeration_index, _esc_count);
+	warnx("UAVCAN ESC enumeration: completed %hhu of %hhu", _esc_enumeration_index, _esc_count);
 
 	if (this_is_the_last_one) {
 		_esc_enumeration_active = false;
 
 		// Tell all ESCs to stop enumerating
 		uavcan::protocol::enumeration::Begin::Request req;
-
 		// TODO: Incorrect implementation; the parameter name field should be left empty.
 		//       Leaving it as-is to avoid breaking compatibility with non-compliant nodes.
 		req.parameter_name = "esc_index";
@@ -941,16 +949,15 @@ UavcanServers::cb_enumeration_save(const uavcan::ServiceCallResult<uavcan::proto
 		int call_res = _enumeration_client.call(get_next_active_node_id(0), req);
 
 		if (call_res < 0) {
-			PX4_ERR("UAVCAN ESC enumeration: couldn't send Begin request to stop enumeration: %d", call_res);
+			warnx("UAVCAN ESC enumeration: couldn't send Begin request to stop enumeration: %d", call_res);
 
 		} else {
-			PX4_INFO("UAVCAN ESC enumeration: sent Begin request to stop enumeration");
+			warnx("UAVCAN ESC enumeration: sent Begin request to stop enumeration");
 		}
 	}
 }
 
-void
-UavcanServers::unpackFwFromROMFS(const char *sd_path, const char *romfs_path)
+void UavcanServers::unpackFwFromROMFS(const char *sd_path, const char *romfs_path)
 {
 	/*
 	Copy the ROMFS firmware directory to the appropriate location on SD, without
@@ -1018,14 +1025,14 @@ UavcanServers::unpackFwFromROMFS(const char *sd_path, const char *romfs_path)
 		size_t srcpath_dev_len = romfs_path_len + 1 + dev_dirname_len;
 
 		if (srcpath_dev_len > maxlen) {
-			PX4_WARN("dev: srcpath '%s/%s' too long", romfs_path, dev_dirent->d_name);
+			warnx("dev: srcpath '%s/%s' too long", romfs_path, dev_dirent->d_name);
 			continue;
 		}
 
 		size_t dstpath_dev_len = sd_path_len + 1 + dev_dirname_len;
 
 		if (dstpath_dev_len > maxlen) {
-			PX4_WARN("dev: dstpath '%s/%s' too long", sd_path, dev_dirent->d_name);
+			warnx("dev: dstpath '%s/%s' too long", sd_path, dev_dirent->d_name);
 			continue;
 		}
 
@@ -1037,7 +1044,7 @@ UavcanServers::unpackFwFromROMFS(const char *sd_path, const char *romfs_path)
 			rv = mkdir(dstpath, S_IRWXU | S_IRWXG | S_IRWXO);
 
 			if (rv != 0) {
-				PX4_ERR("dev: couldn't create '%s'", dstpath);
+				warnx("dev: couldn't create '%s'", dstpath);
 				continue;
 			}
 		}
@@ -1049,7 +1056,7 @@ UavcanServers::unpackFwFromROMFS(const char *sd_path, const char *romfs_path)
 		DIR *const dev_dir = opendir(srcpath);
 
 		if (!dev_dir) {
-			PX4_ERR("dev: couldn't open '%s'", srcpath);
+			warnx("dev: couldn't open '%s'", srcpath);
 			continue;
 		}
 
@@ -1067,14 +1074,14 @@ UavcanServers::unpackFwFromROMFS(const char *sd_path, const char *romfs_path)
 			size_t srcpath_ver_len = srcpath_dev_len + 1 + ver_dirname_len;
 
 			if (srcpath_ver_len > maxlen) {
-				PX4_ERR("ver: srcpath '%s/%s' too long", srcpath, ver_dirent->d_name);
+				warnx("ver: srcpath '%s/%s' too long", srcpath, ver_dirent->d_name);
 				continue;
 			}
 
 			size_t dstpath_ver_len = dstpath_dev_len + 1 + ver_dirname_len;
 
 			if (dstpath_ver_len > maxlen) {
-				PX4_ERR("ver: dstpath '%s/%s' too long", dstpath, ver_dirent->d_name);
+				warnx("ver: dstpath '%s/%s' too long", dstpath, ver_dirent->d_name);
 				continue;
 			}
 
@@ -1086,7 +1093,7 @@ UavcanServers::unpackFwFromROMFS(const char *sd_path, const char *romfs_path)
 				rv = mkdir(dstpath, S_IRWXU | S_IRWXG | S_IRWXO);
 
 				if (rv != 0) {
-					PX4_ERR("ver: couldn't create '%s'", dstpath);
+					warnx("ver: couldn't create '%s'", dstpath);
 					continue;
 				}
 			}
@@ -1100,7 +1107,7 @@ UavcanServers::unpackFwFromROMFS(const char *sd_path, const char *romfs_path)
 			DIR *const src_ver_dir = opendir(srcpath);
 
 			if (!src_ver_dir) {
-				PX4_ERR("ver: couldn't open '%s'", srcpath);
+				warnx("ver: couldn't open '%s'", srcpath);
 				continue;
 			}
 
@@ -1122,7 +1129,7 @@ UavcanServers::unpackFwFromROMFS(const char *sd_path, const char *romfs_path)
 			DIR *const dst_ver_dir = opendir(dstpath);
 
 			if (!dst_ver_dir) {
-				PX4_ERR("unlink: couldn't open '%s'", dstpath);
+				warnx("unlink: couldn't open '%s'", dstpath);
 
 			} else {
 				struct dirent *fw_dirent = NULL;
@@ -1146,14 +1153,14 @@ UavcanServers::unpackFwFromROMFS(const char *sd_path, const char *romfs_path)
 
 						if (dstpath_fw_len > maxlen) {
 							// sizeof(prefix) includes trailing NUL, cancelling out the +1 for the path separator
-							PX4_ERR("unlink: path '%s/%s' too long", dstpath, fw_dirent->d_name);
+							warnx("unlink: path '%s/%s' too long", dstpath, fw_dirent->d_name);
 
 						} else {
 							// File name starts with "_", delete it.
 							dstpath[dstpath_ver_len] = '/';
 							memcpy(&dstpath[dstpath_ver_len + 1], fw_dirent->d_name, dst_fw_len + 1);
 							unlink(dstpath);
-							PX4_ERR("unlink: removed '%s'", dstpath);
+							warnx("unlink: removed '%s'", dstpath);
 						}
 
 					} else {
@@ -1171,10 +1178,10 @@ UavcanServers::unpackFwFromROMFS(const char *sd_path, const char *romfs_path)
 				size_t dstpath_fw_len = dstpath_ver_len + fw_len;
 
 				if (srcpath_fw_len > maxlen) {
-					PX4_ERR("copy: srcpath '%s/%s' too long", srcpath, src_fw_dirent->d_name);
+					warnx("copy: srcpath '%s/%s' too long", srcpath, src_fw_dirent->d_name);
 
 				} else if (dstpath_fw_len > maxlen) {
-					PX4_ERR("copy: dstpath '%s/%s' too long", dstpath, src_fw_dirent->d_name);
+					warnx("copy: dstpath '%s/%s' too long", dstpath, src_fw_dirent->d_name);
 
 				} else {
 					// All OK, make the paths and copy the file
@@ -1187,10 +1194,10 @@ UavcanServers::unpackFwFromROMFS(const char *sd_path, const char *romfs_path)
 					rv = copyFw(dstpath, srcpath);
 
 					if (rv != 0) {
-						PX4_ERR("copy: '%s' -> '%s' failed: %d", srcpath, dstpath, rv);
+						warnx("copy: '%s' -> '%s' failed: %d", srcpath, dstpath, rv);
 
 					} else {
-						PX4_INFO("copy: '%s' -> '%s' succeeded", srcpath, dstpath);
+						warnx("copy: '%s' -> '%s' succeeded", srcpath, dstpath);
 					}
 				}
 			}
@@ -1204,24 +1211,24 @@ UavcanServers::unpackFwFromROMFS(const char *sd_path, const char *romfs_path)
 	(void)closedir(romfs_dir);
 }
 
-int
-UavcanServers::copyFw(const char *dst, const char *src)
+int UavcanServers::copyFw(const char *dst, const char *src)
 {
 	int rv = 0;
-	uint8_t buffer[512] {};
+	int dfd, sfd;
+	uint8_t buffer[512];
 
-	int dfd = open(dst, O_WRONLY | O_CREAT, 0666);
+	dfd = open(dst, O_WRONLY | O_CREAT, 0666);
 
 	if (dfd < 0) {
-		PX4_ERR("copyFw: couldn't open dst");
+		warnx("copyFw: couldn't open dst");
 		return -errno;
 	}
 
-	int sfd = open(src, O_RDONLY, 0);
+	sfd = open(src, O_RDONLY, 0);
 
 	if (sfd < 0) {
 		(void)close(dfd);
-		PX4_ERR("copyFw: couldn't open src");
+		warnx("copyFw: couldn't open src");
 		return -errno;
 	}
 
@@ -1231,7 +1238,7 @@ UavcanServers::copyFw(const char *dst, const char *src)
 		size = read(sfd, buffer, sizeof(buffer));
 
 		if (size < 0) {
-			PX4_ERR("copyFw: couldn't read");
+			warnx("copyFw: couldn't read");
 			rv = -errno;
 
 		} else if (size > 0) {
@@ -1244,7 +1251,7 @@ UavcanServers::copyFw(const char *dst, const char *src)
 				written = write(dfd, &buffer[total_written], remaining);
 
 				if (written < 0) {
-					PX4_ERR("copyFw: couldn't write");
+					warnx("copyFw: couldn't write");
 					rv = -errno;
 
 				} else {

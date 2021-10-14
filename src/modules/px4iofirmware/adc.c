@@ -36,7 +36,7 @@
  *
  * Simple ADC support for PX4IO on STM32.
  */
-#include <px4_platform_common/px4_config.h>
+#include <px4_config.h>
 #include <stdint.h>
 
 #include <nuttx/arch.h>
@@ -44,10 +44,7 @@
 #include <stm32.h>
 
 #include <drivers/drv_hrt.h>
-
-#if defined(PX4IO_PERF)
-# include <perf/perf_counter.h>
-#endif
+#include <perf/perf_counter.h>
 
 #define DEBUG
 #include "px4io.h"
@@ -79,16 +76,12 @@
 #define rJDR4		REG(STM32_ADC_JDR4_OFFSET)
 #define rDR		REG(STM32_ADC_DR_OFFSET)
 
-#if defined(PX4IO_PERF)
 perf_counter_t		adc_perf;
-#endif
 
 int
 adc_init(void)
 {
-#if defined(PX4IO_PERF)
 	adc_perf = perf_alloc(PC_ELAPSED, "adc");
-#endif
 
 	/* put the ADC into power-down mode */
 	rCR2 &= ~ADC_CR2_ADON;
@@ -143,9 +136,8 @@ adc_init(void)
 uint16_t
 adc_measure(unsigned channel)
 {
-#if defined(PX4IO_PERF)
+
 	perf_begin(adc_perf);
-#endif
 
 	/* clear any previous EOC */
 	rSR = 0;
@@ -162,9 +154,7 @@ adc_measure(unsigned channel)
 
 		/* never spin forever - this will give a bogus result though */
 		if (hrt_elapsed_time(&now) > 100) {
-#if defined(PX4IO_PERF)
 			perf_end(adc_perf);
-#endif
 			return 0xffff;
 		}
 	}
@@ -173,8 +163,6 @@ adc_measure(unsigned channel)
 	uint16_t result = rDR;
 	rSR = 0;
 
-#if defined(PX4IO_PERF)
 	perf_end(adc_perf);
-#endif
 	return result;
 }

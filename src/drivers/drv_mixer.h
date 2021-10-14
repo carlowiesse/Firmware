@@ -53,7 +53,7 @@
 #ifndef _DRV_MIXER_H
 #define _DRV_MIXER_H
 
-#include <px4_platform_common/defines.h>
+#include <px4_defines.h>
 #include <stdint.h>
 #include <sys/ioctl.h>
 
@@ -65,7 +65,8 @@
 #define _MIXERIOCBASE		(0x2500)
 #define _MIXERIOC(_n)		(_PX4_IOC(_MIXERIOCBASE, _n))
 
-/* _MIXERIOC(0) was deprecated */
+/** get the number of mixable outputs */
+#define MIXERIOCGETOUTPUTCOUNT	_MIXERIOC(0)
 
 /** reset (clear) the mixer configuration */
 #define MIXERIOCRESET		_MIXERIOC(1)

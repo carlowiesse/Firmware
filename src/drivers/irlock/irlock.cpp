@@ -45,11 +45,11 @@
 #include <drivers/device/i2c.h>
 #include <drivers/device/ringbuffer.h>
 
-#include <px4_platform_common/getopt.h>
+#include <px4_getopt.h>
 #include <px4_platform_common/px4_work_queue/ScheduledWorkItem.hpp>
 #include <systemlib/err.h>
 
-#include <uORB/Publication.hpp>
+#include <uORB/uORB.h>
 #include <uORB/topics/irlock_report.h>
 
 /** Configuration Constants **/
@@ -132,7 +132,7 @@ private:
 	uint32_t _read_failures;
 
 	int _orb_class_instance;
-	uORB::Publication<irlock_report_s> _irlock_report_topic{ORB_ID(irlock_report)};
+	orb_advert_t _irlock_report_topic;
 };
 
 /** global pointer for single IRLOCK sensor **/
@@ -152,7 +152,8 @@ IRLOCK::IRLOCK(int bus, int address) :
 	_reports(nullptr),
 	_sensor_ok(false),
 	_read_failures(0),
-	_orb_class_instance(-1)
+	_orb_class_instance(-1),
+	_irlock_report_topic(nullptr)
 {
 }
 
@@ -365,7 +366,8 @@ int IRLOCK::read_device()
 
 	// publish over uORB
 	if (report.num_targets > 0) {
-		irlock_report_s orb_report{};
+		struct irlock_report_s orb_report;
+
 		orb_report.timestamp = report.timestamp;
 		orb_report.signature = report.targets[0].signature;
 		orb_report.pos_x     = report.targets[0].pos_x;
@@ -373,7 +375,16 @@ int IRLOCK::read_device()
 		orb_report.size_x    = report.targets[0].size_x;
 		orb_report.size_y    = report.targets[0].size_y;
 
-		_irlock_report_topic.publish(orb_report);
+		if (_irlock_report_topic != nullptr) {
+			orb_publish(ORB_ID(irlock_report), _irlock_report_topic, &orb_report);
+
+		} else {
+			_irlock_report_topic = orb_advertise_multi(ORB_ID(irlock_report), &orb_report, &_orb_class_instance, ORB_PRIO_LOW);
+
+			if (_irlock_report_topic == nullptr) {
+				DEVICE_LOG("failed to create irlock_report object. Did you start uOrb?");
+			}
+		}
 	}
 
 	return OK;

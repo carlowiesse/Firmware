@@ -63,10 +63,6 @@ px4_add_module(
 		module.yaml
 	DEPENDS
 		airspeed
-		drivers_accelerometer
-		drivers_barometer
-		drivers_gyroscope
-		drivers_magnetometer
 		git_mavlink_v2
 		conversion
 		git_ecl

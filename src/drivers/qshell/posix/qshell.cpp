@@ -38,7 +38,7 @@
  * @author Nicolas de Palezieux <ndepal@gmail.com>
  */
 
-#include <px4_platform_common/log.h>
+#include <px4_log.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
@@ -50,6 +50,10 @@
 #include "qshell.h"
 
 px4::AppState QShell::appState;
+
+orb_advert_t QShell::_pub_qshell_req = nullptr;
+int QShell::_sub_qshell_retval = -1;
+uint32_t QShell::_current_sequence = 0;
 
 int QShell::main(std::vector<std::string> argList)
 {
@@ -77,7 +81,7 @@ int QShell::_send_cmd(std::vector<std::string> &argList)
 	// it had timed out.
 	++_current_sequence;
 
-	qshell_req_s qshell_req{};
+	struct qshell_req_s qshell_req;
 	std::string cmd;
 
 	for (size_t i = 0; i < argList.size(); i++) {
@@ -99,20 +103,34 @@ int QShell::_send_cmd(std::vector<std::string> &argList)
 	strcpy((char *)qshell_req.cmd, cmd.c_str());
 	qshell_req.request_sequence = _current_sequence;
 
-	qshell_req.timestamp = hrt_absolute_time();
-	_qshell_req_pub.publish(qshell_req);
+	int instance;
+	orb_publish_auto(ORB_ID(qshell_req), &_pub_qshell_req, &qshell_req, &instance, ORB_PRIO_DEFAULT);
 
 	return 0;
 }
 
 int QShell::_wait_for_retval()
 {
+	if (_sub_qshell_retval < 0) {
+		_sub_qshell_retval = orb_subscribe(ORB_ID(qshell_retval));
+
+		if (_sub_qshell_retval < 0) {
+			PX4_ERR("could not subscribe to retval");
+			return -1;
+		}
+	}
+
 	const hrt_abstime time_started_us = hrt_absolute_time();
 
 	while (hrt_elapsed_time(&time_started_us) < 3000000) {
-		qshell_retval_s retval;
+		bool updated;
+		orb_check(_sub_qshell_retval, &updated);
 
-		if (_qshell_retval_sub.update(&retval)) {
+		if (updated) {
+
+			struct qshell_retval_s retval;
+			orb_copy(ORB_ID(qshell_retval), _sub_qshell_retval, &retval);
+
 			if (retval.return_sequence != _current_sequence) {
 				PX4_WARN("Ignoring return value with wrong sequence");
 
@@ -125,7 +143,7 @@ int QShell::_wait_for_retval()
 			}
 		}
 
-		px4_usleep(1000);
+		usleep(1000);
 	}
 
 	PX4_ERR("command timed out");

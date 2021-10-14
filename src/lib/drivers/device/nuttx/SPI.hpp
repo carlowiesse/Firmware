@@ -42,9 +42,6 @@
 
 #include "../CDev.hpp"
 
-#include <nuttx/spi/spi.h>
-#include <px4_platform_common/spi.h>
-
 namespace device __EXPORT
 {
 
@@ -53,13 +50,6 @@ namespace device __EXPORT
  */
 class __EXPORT SPI : public CDev
 {
-public:
-	// no copy, assignment, move, move assignment
-	SPI(const SPI &) = delete;
-	SPI &operator=(const SPI &) = delete;
-	SPI(SPI &&) = delete;
-	SPI &operator=(SPI &&) = delete;
-
 protected:
 	/**
 	 * Constructor
@@ -83,7 +73,7 @@ protected:
 		LOCK_NONE		/**< perform no locking, only safe if the bus is entirely private */
 	};
 
-	virtual int	init() override;
+	virtual int	init();
 
 	/**
 	 * Check for the presence of the device on the bus.
@@ -162,12 +152,16 @@ private:
 
 	LockMode		_locking_mode{LOCK_THREADS};	/**< selected locking mode */
 
+	/* this class does not allow copying */
+	SPI(const SPI &);
+	SPI operator=(const SPI &);
+
 protected:
 	int	_transfer(uint8_t *send, uint8_t *recv, unsigned len);
 
 	int	_transferhword(uint16_t *send, uint16_t *recv, unsigned len);
 
-	bool	external() const override { return px4_spi_bus_external(get_device_bus()); }
+	bool	external() { return px4_spi_bus_external(get_device_bus()); }
 
 };
 

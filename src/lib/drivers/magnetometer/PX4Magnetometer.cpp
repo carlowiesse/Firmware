@@ -54,7 +54,8 @@ PX4Magnetometer::~PX4Magnetometer()
 	}
 }
 
-int PX4Magnetometer::ioctl(cdev::file_t *filp, int cmd, unsigned long arg)
+int
+PX4Magnetometer::ioctl(cdev::file_t *filp, int cmd, unsigned long arg)
 {
 	switch (cmd) {
 	case MAGIOCSSCALE: {
@@ -90,7 +91,8 @@ int PX4Magnetometer::ioctl(cdev::file_t *filp, int cmd, unsigned long arg)
 	}
 }
 
-void PX4Magnetometer::set_device_type(uint8_t devtype)
+void
+PX4Magnetometer::set_device_type(uint8_t devtype)
 {
 	// current DeviceStructure
 	union device::Device::DeviceId device_id;
@@ -103,15 +105,19 @@ void PX4Magnetometer::set_device_type(uint8_t devtype)
 	_sensor_mag_pub.get().device_id = device_id.devid;
 }
 
-void PX4Magnetometer::update(hrt_abstime timestamp_sample, float x, float y, float z)
+void
+PX4Magnetometer::update(hrt_abstime timestamp, int16_t x, int16_t y, int16_t z)
 {
 	sensor_mag_s &report = _sensor_mag_pub.get();
-	report.timestamp = timestamp_sample;
+	report.timestamp = timestamp;
 
 	// Apply rotation (before scaling)
-	rotate_3f(_rotation, x, y, z);
+	float xraw_f = x;
+	float yraw_f = y;
+	float zraw_f = z;
+	rotate_3f(_rotation, xraw_f, yraw_f, zraw_f);
 
-	const matrix::Vector3f raw_f{x, y, z};
+	const matrix::Vector3f raw_f{xraw_f, yraw_f, zraw_f};
 
 	// Apply range scale and the calibrating offset/scale
 	const matrix::Vector3f val_calibrated{(((raw_f.emult(_sensitivity) * report.scaling) - _calibration_offset).emult(_calibration_scale))};
@@ -125,10 +131,12 @@ void PX4Magnetometer::update(hrt_abstime timestamp_sample, float x, float y, flo
 	report.y = val_calibrated(1);
 	report.z = val_calibrated(2);
 
+	poll_notify(POLLIN);
 	_sensor_mag_pub.update();
 }
 
-void PX4Magnetometer::print_status()
+void
+PX4Magnetometer::print_status()
 {
 	PX4_INFO(MAG_BASE_DEVICE_PATH " device instance: %d", _class_device_instance);
 
@@ -136,4 +144,6 @@ void PX4Magnetometer::print_status()
 		 (double)_calibration_scale(2));
 	PX4_INFO("calibration offset: %.5f %.5f %.5f", (double)_calibration_offset(0), (double)_calibration_offset(1),
 		 (double)_calibration_offset(2));
+
+	print_message(_sensor_mag_pub.get());
 }

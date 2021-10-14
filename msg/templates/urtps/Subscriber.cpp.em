@@ -12,7 +12,7 @@
 @###############################################
 @{
 import genmsg.msgs
-
+import gencpp
 from px_generate_uorb_topic_helper import * # this is in Tools/
 
 topic = alias if alias else spec.short_name
@@ -24,7 +24,7 @@ except AttributeError:
 /****************************************************************************
  *
  * Copyright 2017 Proyectos y Sistemas de Mantenimiento SL (eProsima).
- * Copyright (c) 2018-2019 PX4 Development Team. All rights reserved.
+ * Copyright (C) 2018-2019 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -74,13 +74,8 @@ except AttributeError:
 
 @(topic)_Subscriber::~@(topic)_Subscriber() {   Domain::removeParticipant(mp_participant);}
 
-bool @(topic)_Subscriber::init(uint8_t topic_ID, std::condition_variable* t_send_queue_cv, std::mutex* t_send_queue_mutex, std::queue<uint8_t>* t_send_queue)
+bool @(topic)_Subscriber::init()
 {
-    m_listener.topic_ID = topic_ID;
-    m_listener.t_send_queue_cv = t_send_queue_cv;
-    m_listener.t_send_queue_mutex = t_send_queue_mutex;
-    m_listener.t_send_queue = t_send_queue;
-
     // Create RTPSParticipant
     ParticipantAttributes PParam;
     PParam.rtps.builtin.domainId = 0; // MUST BE THE SAME AS IN THE PUBLISHER
@@ -94,21 +89,13 @@ bool @(topic)_Subscriber::init(uint8_t topic_ID, std::condition_variable* t_send
     if(mp_participant == nullptr)
             return false;
 
-@[if ros2_distro and (ros2_distro == "dashing" or ros2_distro == "eloquent")]@
-    // Type name should match the expected type name on ROS2
-    // Note: the change is being done here since the 'fastrtpsgen' example
-    // generator does not allow to change the type naming on the template of
-    // "*PubSubTypes.cpp" file
-    @(topic)DataType.setName("@(package)::msg::dds_::@(topic)_");
-@[end if]@
-
     //Register the type
-    Domain::registerType(mp_participant, static_cast<TopicDataType*>(&@(topic)DataType));
+    Domain::registerType(mp_participant, static_cast<TopicDataType*>(&myType));
 
     // Create Subscriber
     SubscriberAttributes Rparam;
     Rparam.topic.topicKind = NO_KEY;
-    Rparam.topic.topicDataType = @(topic)DataType.getName();
+    Rparam.topic.topicDataType = myType.getName(); //Must be registered before the creation of the subscriber
 @[if ros2_distro]@
 @[    if ros2_distro == "ardent"]@
     Rparam.qos.m_partition.push_back("rt");
@@ -127,76 +114,60 @@ bool @(topic)_Subscriber::init(uint8_t topic_ID, std::condition_variable* t_send
 
 void @(topic)_Subscriber::SubListener::onSubscriptionMatched(Subscriber* sub, MatchingInfo& info)
 {
-@# Since the time sync runs on the bridge itself, it is required that there is a
-@# match between two topics of the same entity
-@[if topic != 'Timesync' and topic != 'timesync']@
-    // The first 6 values of the ID guidPrefix of an entity in a DDS-RTPS Domain
-    // are the same for all its subcomponents (publishers, subscribers)
-    bool is_different_endpoint = false;
-    for (size_t i = 0; i < 6; i++) {
-        if (sub->getGuid().guidPrefix.value[i] != info.remoteEndpointGuid.guidPrefix.value[i]) {
-            is_different_endpoint = true;
-            break;
-        }
-    }
-
-    // If the matching happens for the same entity, do not make a match
-    if (is_different_endpoint) {
-        if (info.status == MATCHED_MATCHING) {
-            n_matched++;
-            std::cout << " - @(topic) subscriber matched" << std::endl;
-        } else {
-            n_matched--;
-            std::cout << " - @(topic) subscriber unmatched" << std::endl;
-        }
-    }
-@[else]@
     (void)sub;
 
-    if (info.status == MATCHED_MATCHING) {
+    if (info.status == MATCHED_MATCHING)
+    {
         n_matched++;
-    } else {
-        n_matched--;
+        std::cout << "Subscriber matched" << std::endl;
     }
-@[end if]@
+    else
+    {
+        n_matched--;
+        std::cout << "Subscriber unmatched" << std::endl;
+    }
 }
 
 void @(topic)_Subscriber::SubListener::onNewDataMessage(Subscriber* sub)
 {
-    if (n_matched > 0) {
-        std::unique_lock<std::mutex> has_msg_lock(has_msg_mutex);
-        if(has_msg.load() == true) // Check if msg has been fetched
-        {
-            has_msg_cv.wait(has_msg_lock); // Wait till msg has been fetched
-        }
-        has_msg_lock.unlock();
-
         // Take data
-        if(sub->takeNextData(&msg, &m_info))
+@[if 1.5 <= fastrtpsgen_version <= 1.7]@
+@[    if ros2_distro]@
+        @(package)::msg::dds_::@(topic)_ st;
+@[    else]@
+        @(topic)_ st;
+@[    end if]@
+@[else]@
+@[    if ros2_distro]@
+        @(package)::msg::@(topic) st;
+@[    else]@
+        @(topic) st;
+@[    end if]@
+@[end if]@
+
+        if(sub->takeNextData(&st, &m_info))
         {
             if(m_info.sampleKind == ALIVE)
             {
-                std::unique_lock<std::mutex> lk(*t_send_queue_mutex);
-
+                // Print your structure data here.
                 ++n_msg;
+                //std::cout << "Sample received, count=" << n_msg << std::endl;
                 has_msg = true;
-
-                t_send_queue->push(topic_ID);
-                lk.unlock();
-                t_send_queue_cv->notify_one();
 
             }
         }
-    }
+}
+
+void @(topic)_Subscriber::run()
+{
+    std::cout << "Waiting for Data, press Enter to stop the Subscriber. "<<std::endl;
+    std::cin.ignore();
+    std::cout << "Shutting down the Subscriber." << std::endl;
 }
 
 bool @(topic)_Subscriber::hasMsg()
 {
-    if (m_listener.n_matched > 0) {
-        return m_listener.has_msg.load();
-    }
-
-    return false;
+    return m_listener.has_msg;
 }
 
 @[if 1.5 <= fastrtpsgen_version <= 1.7]@
@@ -213,15 +184,6 @@ bool @(topic)_Subscriber::hasMsg()
 @[    end if]@
 @[end if]@
 {
+    m_listener.has_msg = false;
     return m_listener.msg;
-}
-
-void @(topic)_Subscriber::unlockMsg()
-{
-    if (m_listener.n_matched > 0) {
-        std::unique_lock<std::mutex> has_msg_lock(m_listener.has_msg_mutex);
-        m_listener.has_msg = false;
-        has_msg_lock.unlock();
-        m_listener.has_msg_cv.notify_one();
-    }
 }

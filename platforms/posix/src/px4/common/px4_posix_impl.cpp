@@ -37,10 +37,9 @@
  * PX4 Middleware Wrapper Linux Implementation
  */
 
-#include <px4_platform_common/defines.h>
-#include <px4_platform_common/workqueue.h>
-#include <px4_platform_common/defines.h>
-#include <px4_platform_common/time.h>
+#include <px4_defines.h>
+#include <px4_workqueue.h>
+#include <px4_defines.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <signal.h>
@@ -49,8 +48,9 @@
 #include <parameters/param.h>
 #include "hrt_work.h"
 #include <drivers/drv_hrt.h>
+#include "px4_time.h"
 #include <pthread.h>
-#include <px4_platform_common/init.h>
+#include <px4_init.h>
 
 extern pthread_t _shell_task_id;
 
@@ -68,6 +68,7 @@ void init_once();
 void init_once()
 {
 	_shell_task_id = pthread_self();
+	//printf("[init] shell id: %lu\n", (unsigned long)_shell_task_id);
 
 	work_queues_init();
 	hrt_work_queue_init();

@@ -3,8 +3,6 @@
 # Airmind Mindpx-v2 specific board sensors init
 #------------------------------------------------------------------------------
 
-adc start
-
 # External I2C bus
 hmc5883 -C -T -X start
 qmc5883 -X start

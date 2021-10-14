@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2012-2020 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2012-2018 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -84,6 +84,8 @@ static Mavlink *_mavlink_instances = nullptr;
  * @ingroup apps
  */
 extern "C" __EXPORT int mavlink_main(int argc, char *argv[]);
+
+extern mavlink_system_t mavlink_system;
 
 void mavlink_send_uart_bytes(mavlink_channel_t chan, const uint8_t *ch, int length)
 {
@@ -465,16 +467,22 @@ Mavlink::forward_message(const mavlink_message_t *msg, Mavlink *self)
 				}
 			}
 
-			// If it's a message only for us, we keep it, otherwise, we forward it.
-			const bool targeted_only_at_us =
-				(target_system_id == self->get_system_id() &&
-				 target_component_id == self->get_component_id());
+			// We forward messages targetted at the same system, or addressed to all systems, or
+			// if not target system is set.
+			const bool target_system_id_ok =
+				(target_system_id == 0 || target_system_id == self->get_system_id());
+
+			// We forward messages that are targetting another component, or are addressed to all
+			// components, or if the target component is not set.
+			const bool target_component_id_ok =
+				(target_component_id == 0 || target_component_id != self->get_component_id());
 
 			// We don't forward heartbeats unless it's specifically enabled.
 			const bool heartbeat_check_ok =
 				(msg->msgid != MAVLINK_MSG_ID_HEARTBEAT || self->forward_heartbeats_enabled());
 
-			if (!targeted_only_at_us && heartbeat_check_ok) {
+			if (target_system_id_ok && target_component_id_ok && heartbeat_check_ok) {
+
 				inst->pass_message(msg);
 			}
 		}
@@ -609,11 +617,7 @@ Mavlink::mavlink_open_uart(const int baud, const char *uart_name, const bool for
 		}
 	}
 
-	/*
-	 * Return here in the iridium mode since the iridium driver does not
-	 * support the subsequent function calls.
-	*/
-	if (_uart_fd < 0 || _mode == MAVLINK_MODE_IRIDIUM) {
+	if (_uart_fd < 0) {
 		return _uart_fd;
 	}
 
@@ -1532,15 +1536,13 @@ Mavlink::update_rate_mult()
 	} else if (_radio_status_available) {
 
 		// check for RADIO_STATUS timeout and reset
-		if (hrt_elapsed_time(&_rstatus.timestamp) > (_param_mav_radio_timeout.get() *
-				1_s)) {
+		if (hrt_elapsed_time(&_rstatus.timestamp) > 5_s) {
 			PX4_ERR("instance %d: RADIO_STATUS timeout", _instance_id);
-			_radio_status_available = false;
+			set_telemetry_status_type(telemetry_status_s::LINK_TYPE_GENERIC);
 
-			if (_use_software_mav_throttling) {
-				_radio_status_critical = false;
-				_radio_status_mult = 1.0f;
-			}
+			_radio_status_available = false;
+			_radio_status_critical = false;
+			_radio_status_mult = 1.0f;
 		}
 
 		hardware_mult *= _radio_status_mult;
@@ -1557,25 +1559,23 @@ void
 Mavlink::update_radio_status(const radio_status_s &radio_status)
 {
 	_rstatus = radio_status;
+	set_telemetry_status_type(telemetry_status_s::LINK_TYPE_3DR_RADIO);
+
+	/* check hardware limits */
 	_radio_status_available = true;
+	_radio_status_critical = (radio_status.txbuf < RADIO_BUFFER_LOW_PERCENTAGE);
 
-	if (_use_software_mav_throttling) {
+	if (radio_status.txbuf < RADIO_BUFFER_CRITICAL_LOW_PERCENTAGE) {
+		/* this indicates link congestion, reduce rate by 20% */
+		_radio_status_mult *= 0.80f;
 
-		/* check hardware limits */
-		_radio_status_critical = (radio_status.txbuf < RADIO_BUFFER_LOW_PERCENTAGE);
+	} else if (radio_status.txbuf < RADIO_BUFFER_LOW_PERCENTAGE) {
+		/* this indicates link congestion, reduce rate by 2.5% */
+		_radio_status_mult *= 0.975f;
 
-		if (radio_status.txbuf < RADIO_BUFFER_CRITICAL_LOW_PERCENTAGE) {
-			/* this indicates link congestion, reduce rate by 20% */
-			_radio_status_mult *= 0.80f;
-
-		} else if (radio_status.txbuf < RADIO_BUFFER_LOW_PERCENTAGE) {
-			/* this indicates link congestion, reduce rate by 2.5% */
-			_radio_status_mult *= 0.975f;
-
-		} else if (radio_status.txbuf > RADIO_BUFFER_HALF_PERCENTAGE) {
-			/* this indicates spare bandwidth, increase by 2.5% */
-			_radio_status_mult *= 1.025f;
-		}
+	} else if (radio_status.txbuf > RADIO_BUFFER_HALF_PERCENTAGE) {
+		/* this indicates spare bandwidth, increase by 2.5% */
+		_radio_status_mult *= 1.025f;
 	}
 }
 
@@ -1661,7 +1661,6 @@ Mavlink::configure_streams_to_default(const char *configure_single_stream)
 		configure_stream_local("LOCAL_POSITION_NED", 30.0f);
 		configure_stream_local("NAMED_VALUE_FLOAT", 10.0f);
 		configure_stream_local("NAV_CONTROLLER_OUTPUT", 10.0f);
-		configure_stream_local("OBSTACLE_DISTANCE", 10.0f);
 		configure_stream_local("ODOMETRY", 30.0f);
 		configure_stream_local("OPTICAL_FLOW_RAD", 10.0f);
 		configure_stream_local("ORBIT_EXECUTION_STATUS", 5.0f);
@@ -1719,7 +1718,6 @@ Mavlink::configure_streams_to_default(const char *configure_single_stream)
 		configure_stream_local("UTM_GLOBAL_POSITION", 1.0f);
 		configure_stream_local("VFR_HUD", 4.0f);
 		configure_stream_local("WIND_COV", 1.0f);
-		configure_stream_local("OBSTACLE_DISTANCE", 10.0f);
 		break;
 
 
@@ -1856,7 +1854,7 @@ Mavlink::task_main(int argc, char *argv[])
 	int temp_int_arg;
 #endif
 
-	while ((ch = px4_getopt(argc, argv, "b:r:d:n:u:o:m:t:c:fswxz", &myoptind, &myoptarg)) != EOF) {
+	while ((ch = px4_getopt(argc, argv, "b:r:d:n:u:o:m:t:c:fwxz", &myoptind, &myoptarg)) != EOF) {
 		switch (ch) {
 		case 'b':
 			if (px4_get_parameter_value(myoptarg, _baudrate) != 0) {
@@ -2035,10 +2033,6 @@ Mavlink::task_main(int argc, char *argv[])
 
 		case 'f':
 			_forwarding_on = true;
-			break;
-
-		case 's':
-			_use_software_mav_throttling = true;
 			break;
 
 		case 'w':
@@ -2266,13 +2260,13 @@ Mavlink::task_main(int argc, char *argv[])
 #endif // CONFIG_NET
 		}
 
-		configure_sik_radio();
+		check_radio_config();
 
 		if (status_sub->update(&status_time, &status)) {
 			/* switch HIL mode if required */
 			set_hil_enabled(status.hil_state == vehicle_status_s::HIL_STATE_ON);
 
-			set_generate_virtual_rc_input(status.rc_input_mode == vehicle_status_s::RC_IN_MODE_GENERATED);
+			set_manual_input_mode_generation(status.rc_input_mode == vehicle_status_s::RC_IN_MODE_GENERATED);
 
 			if (_mode == MAVLINK_MODE_IRIDIUM) {
 
@@ -2616,10 +2610,11 @@ void Mavlink::publish_telemetry_status()
 	_telem_status_pub.publish(_tstatus);
 }
 
-void Mavlink::configure_sik_radio()
+void Mavlink::check_radio_config()
 {
 	/* radio config check */
-	if (_uart_fd >= 0 && _param_sik_radio_id.get() != 0) {
+	if (_uart_fd >= 0 && _param_mav_radio_id.get() != 0
+	    && _tstatus.type == telemetry_status_s::LINK_TYPE_3DR_RADIO) {
 		/* request to configure radio and radio is present */
 		FILE *fs = fdopen(_uart_fd, "w");
 
@@ -2629,9 +2624,9 @@ void Mavlink::configure_sik_radio()
 			fprintf(fs, "+++\n");
 			px4_usleep(1200000);
 
-			if (_param_sik_radio_id.get() > 0) {
+			if (_param_mav_radio_id.get() > 0) {
 				/* set channel */
-				fprintf(fs, "ATS3=%u\n", _param_sik_radio_id.get());
+				fprintf(fs, "ATS3=%u\n", _param_mav_radio_id.get());
 				px4_usleep(200000);
 
 			} else {
@@ -2662,8 +2657,8 @@ void Mavlink::configure_sik_radio()
 		}
 
 		/* reset param and save */
-		_param_sik_radio_id.set(0);
-		_param_sik_radio_id.commit_no_notification();
+		_param_mav_radio_id.set(0);
+		_param_mav_radio_id.commit_no_notification();
 	}
 }
 
@@ -2762,8 +2757,9 @@ Mavlink::display_status()
 
 		printf("\ttype:\t\t");
 
-		if (_radio_status_available) {
-			printf("RADIO Link\n");
+		switch (_tstatus.type) {
+		case telemetry_status_s::LINK_TYPE_3DR_RADIO:
+			printf("3DR RADIO\n");
 			printf("\t  rssi:\t\t%d\n", _rstatus.rssi);
 			printf("\t  remote rssi:\t%u\n", _rstatus.remote_rssi);
 			printf("\t  txbuf:\t%u\n", _rstatus.txbuf);
@@ -2771,12 +2767,15 @@ Mavlink::display_status()
 			printf("\t  remote noise:\t%u\n", _rstatus.remote_noise);
 			printf("\t  rx errors:\t%u\n", _rstatus.rxerrors);
 			printf("\t  fixed:\t%u\n", _rstatus.fix);
+			break;
 
-		} else if (_is_usb_uart) {
+		case telemetry_status_s::LINK_TYPE_USB:
 			printf("USB CDC\n");
+			break;
 
-		} else {
+		default:
 			printf("GENERIC LINK OR RADIO\n");
+			break;
 		}
 
 	} else {

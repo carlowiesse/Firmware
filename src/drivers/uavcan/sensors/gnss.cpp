@@ -47,34 +47,29 @@
 #include <systemlib/err.h>
 #include <mathlib/mathlib.h>
 
-using namespace time_literals;
-
 const char *const UavcanGnssBridge::NAME = "gnss";
 
 UavcanGnssBridge::UavcanGnssBridge(uavcan::INode &node) :
 	_node(node),
-	_sub_auxiliary(node),
 	_sub_fix(node),
 	_sub_fix2(node),
 	_pub_fix2(node),
-	_orb_to_uavcan_pub_timer(node, TimerCbBinder(this, &UavcanGnssBridge::broadcast_from_orb))
+	_orb_to_uavcan_pub_timer(node, TimerCbBinder(this, &UavcanGnssBridge::broadcast_from_orb)),
+	_report_pub(nullptr)
 {
 }
 
-int
-UavcanGnssBridge::init()
+UavcanGnssBridge::~UavcanGnssBridge()
+{
+	(void) orb_unsubscribe(_orb_sub_gnss);
+}
+
+int UavcanGnssBridge::init()
 {
 	int res = _pub_fix2.init(uavcan::TransferPriority::MiddleLower);
 
 	if (res < 0) {
 		PX4_WARN("GNSS fix2 pub failed %i", res);
-		return res;
-	}
-
-	res = _sub_auxiliary.start(AuxiliaryCbBinder(this, &UavcanGnssBridge::gnss_auxiliary_sub_cb));
-
-	if (res < 0) {
-		PX4_WARN("GNSS auxiliary sub failed %i", res);
 		return res;
 	}
 
@@ -92,19 +87,18 @@ UavcanGnssBridge::init()
 		return res;
 	}
 
-	_orb_to_uavcan_pub_timer.startPeriodic(uavcan::MonotonicDuration::fromUSec(1000000U / ORB_TO_UAVCAN_FREQUENCY_HZ));
+	_orb_to_uavcan_pub_timer.startPeriodic(
+		uavcan::MonotonicDuration::fromUSec(1000000U / ORB_TO_UAVCAN_FREQUENCY_HZ));
 
 	return res;
 }
 
-unsigned
-UavcanGnssBridge::get_num_redundant_channels() const
+unsigned UavcanGnssBridge::get_num_redundant_channels() const
 {
 	return (_receiver_node_id < 0) ? 0 : 1;
 }
 
-void
-UavcanGnssBridge::print_status() const
+void UavcanGnssBridge::print_status() const
 {
 	printf("RX errors: %d, using old Fix: %d, receiver node id: ",
 	       _sub_fix.getFailureCount(), int(_old_fix_subscriber_active));
@@ -117,17 +111,7 @@ UavcanGnssBridge::print_status() const
 	}
 }
 
-void
-UavcanGnssBridge::gnss_auxiliary_sub_cb(const uavcan::ReceivedDataStructure<uavcan::equipment::gnss::Auxiliary> &msg)
-{
-	// store latest hdop and vdop for use in process_fixx();
-	_last_gnss_auxiliary_timestamp = hrt_absolute_time();
-	_last_gnss_auxiliary_hdop = msg.hdop;
-	_last_gnss_auxiliary_vdop = msg.vdop;
-}
-
-void
-UavcanGnssBridge::gnss_fix_sub_cb(const uavcan::ReceivedDataStructure<uavcan::equipment::gnss::Fix> &msg)
+void UavcanGnssBridge::gnss_fix_sub_cb(const uavcan::ReceivedDataStructure<uavcan::equipment::gnss::Fix> &msg)
 {
 	const bool valid_pos_cov = !msg.position_covariance.empty();
 	const bool valid_vel_cov = !msg.velocity_covariance.empty();
@@ -141,11 +125,10 @@ UavcanGnssBridge::gnss_fix_sub_cb(const uavcan::ReceivedDataStructure<uavcan::eq
 	process_fixx(msg, pos_cov, vel_cov, valid_pos_cov, valid_vel_cov);
 }
 
-void
-UavcanGnssBridge::gnss_fix2_sub_cb(const uavcan::ReceivedDataStructure<uavcan::equipment::gnss::Fix2> &msg)
+void UavcanGnssBridge::gnss_fix2_sub_cb(const uavcan::ReceivedDataStructure<uavcan::equipment::gnss::Fix2> &msg)
 {
 	if (_old_fix_subscriber_active) {
-		PX4_INFO("GNSS Fix2 message detected, disabling support for the old Fix message");
+		PX4_WARN("GNSS Fix2 message detected, disabling support for the old Fix message");
 		_sub_fix.stop();
 		_old_fix_subscriber_active = false;
 		_receiver_node_id = -1;
@@ -156,8 +139,8 @@ UavcanGnssBridge::gnss_fix2_sub_cb(const uavcan::ReceivedDataStructure<uavcan::e
 	bool valid_covariances = true;
 
 	switch (msg.covariance.size()) {
+	// Scalar matrix
 	case 1: {
-			// Scalar matrix
 			const auto x = msg.covariance[0];
 
 			pos_cov[0] = x;
@@ -167,11 +150,11 @@ UavcanGnssBridge::gnss_fix2_sub_cb(const uavcan::ReceivedDataStructure<uavcan::e
 			vel_cov[0] = x;
 			vel_cov[4] = x;
 			vel_cov[8] = x;
+			break;
 		}
-		break;
 
+	// Diagonal matrix (the most common case)
 	case 6: {
-			// Diagonal matrix (the most common case)
 			pos_cov[0] = msg.covariance[0];
 			pos_cov[4] = msg.covariance[1];
 			pos_cov[8] = msg.covariance[2];
@@ -179,21 +162,19 @@ UavcanGnssBridge::gnss_fix2_sub_cb(const uavcan::ReceivedDataStructure<uavcan::e
 			vel_cov[0] = msg.covariance[3];
 			vel_cov[4] = msg.covariance[4];
 			vel_cov[8] = msg.covariance[5];
-
+			break;
 		}
-		break;
 
-
+	// Upper triangular matrix.
+	// This code has been carefully optimized by hand. We could use unpackSquareMatrix(), but it's slow.
+	// Sub-matrix indexes (empty squares contain velocity-position covariance data):
+	// 0  1  2
+	// 1  6  7
+	// 2  7 11
+	//         15 16 17
+	//         16 18 19
+	//         17 19 20
 	case 21: {
-			// Upper triangular matrix.
-			// This code has been carefully optimized by hand. We could use unpackSquareMatrix(), but it's slow.
-			// Sub-matrix indexes (empty squares contain velocity-position covariance data):
-			// 0  1  2
-			// 1  6  7
-			// 2  7 11
-			//         15 16 17
-			//         16 18 19
-			//         17 19 20
 			pos_cov[0] = msg.covariance[0];
 			pos_cov[1] = msg.covariance[1];
 			pos_cov[2] = msg.covariance[2];
@@ -216,16 +197,17 @@ UavcanGnssBridge::gnss_fix2_sub_cb(const uavcan::ReceivedDataStructure<uavcan::e
 		}
 
 	/* FALLTHROUGH */
+
+	// Full matrix 6x6.
+	// This code has been carefully optimized by hand. We could use unpackSquareMatrix(), but it's slow.
+	// Sub-matrix indexes (empty squares contain velocity-position covariance data):
+	//  0  1  2
+	//  6  7  8
+	// 12 13 14
+	//          21 22 23
+	//          27 28 29
+	//          33 34 35
 	case 36: {
-			// Full matrix 6x6.
-			// This code has been carefully optimized by hand. We could use unpackSquareMatrix(), but it's slow.
-			// Sub-matrix indexes (empty squares contain velocity-position covariance data):
-			//  0  1  2
-			//  6  7  8
-			// 12 13 14
-			//          21 22 23
-			//          27 28 29
-			//          33 34 35
 			pos_cov[0] = msg.covariance[0];
 			pos_cov[1] = msg.covariance[1];
 			pos_cov[2] = msg.covariance[2];
@@ -248,8 +230,9 @@ UavcanGnssBridge::gnss_fix2_sub_cb(const uavcan::ReceivedDataStructure<uavcan::e
 		}
 
 	/* FALLTHROUGH */
+
+	// Either empty or invalid sized, interpret as zero matrix
 	default: {
-			// Either empty or invalid sized, interpret as zero matrix
 			valid_covariances = false;
 			break;	// Nothing to do
 		}
@@ -260,13 +243,15 @@ UavcanGnssBridge::gnss_fix2_sub_cb(const uavcan::ReceivedDataStructure<uavcan::e
 
 template <typename FixType>
 void UavcanGnssBridge::process_fixx(const uavcan::ReceivedDataStructure<FixType> &msg,
-				    const float (&pos_cov)[9], const float (&vel_cov)[9],
-				    const bool valid_pos_cov, const bool valid_vel_cov)
+				    const float (&pos_cov)[9],
+				    const float (&vel_cov)[9],
+				    const bool valid_pos_cov,
+				    const bool valid_vel_cov)
 {
 	// This bridge does not support redundant GNSS receivers yet.
 	if (_receiver_node_id < 0) {
 		_receiver_node_id = msg.getSrcNodeID().get();
-		PX4_INFO("GNSS receiver node ID: %d", _receiver_node_id);
+		PX4_WARN("GNSS receiver node ID: %d", _receiver_node_id);
 
 	} else {
 		if (_receiver_node_id != msg.getSrcNodeID().get()) {
@@ -274,7 +259,7 @@ void UavcanGnssBridge::process_fixx(const uavcan::ReceivedDataStructure<FixType>
 		}
 	}
 
-	vehicle_gps_position_s report{};
+	auto report = ::vehicle_gps_position_s();
 
 	/*
 	 * FIXME HACK
@@ -344,78 +329,107 @@ void UavcanGnssBridge::process_fixx(const uavcan::ReceivedDataStructure<FixType>
 
 	report.timestamp_time_relative = 0;
 
-	const uint64_t gnss_ts_usec = uavcan::UtcTime(msg.gnss_timestamp).toUSec();
+	const std::uint64_t gnss_ts_usec = uavcan::UtcTime(msg.gnss_timestamp).toUSec();
 
 	switch (msg.gnss_time_standard) {
-	case FixType::GNSS_TIME_STANDARD_UTC:
-		report.time_utc_usec = gnss_ts_usec;
-		break;
-
-	case FixType::GNSS_TIME_STANDARD_GPS:
-		if (msg.num_leap_seconds > 0) {
-			report.time_utc_usec = gnss_ts_usec - msg.num_leap_seconds + 9;
+	case FixType::GNSS_TIME_STANDARD_UTC: {
+			report.time_utc_usec = gnss_ts_usec;
+			break;
 		}
 
-		break;
+	case FixType::GNSS_TIME_STANDARD_GPS: {
+			if (msg.num_leap_seconds > 0) {
+				report.time_utc_usec = gnss_ts_usec - msg.num_leap_seconds + 9;
+			}
 
-	case FixType::GNSS_TIME_STANDARD_TAI:
-		if (msg.num_leap_seconds > 0) {
-			report.time_utc_usec = gnss_ts_usec - msg.num_leap_seconds - 10;
+			break;
 		}
 
-		break;
+	case FixType::GNSS_TIME_STANDARD_TAI: {
+			if (msg.num_leap_seconds > 0) {
+				report.time_utc_usec = gnss_ts_usec - msg.num_leap_seconds - 10;
+			}
 
-	default:
-		break;
+			break;
+		}
+
+	default: {
+			break;
+		}
 	}
+
+//TODO px4_clock_settime does nothing on the Snapdragon platform
+#ifndef __PX4_QURT
 
 	// If we haven't already done so, set the system clock using GPS data
 	if (valid_pos_cov && !_system_clock_set) {
-		timespec ts{};
-
+		timespec ts;
+		memset(&ts, 0, sizeof(ts));
 		// get the whole microseconds
 		ts.tv_sec = report.time_utc_usec / 1000000ULL;
-
 		// get the remainder microseconds and convert to nanoseconds
 		ts.tv_nsec = (report.time_utc_usec % 1000000ULL) * 1000;
-
 		px4_clock_settime(CLOCK_REALTIME, &ts);
-
 		_system_clock_set = true;
 	}
 
+#endif
+
 	report.satellites_used = msg.sats_used;
 
-	if (hrt_elapsed_time(&_last_gnss_auxiliary_timestamp) < 2_s) {
-		report.hdop = _last_gnss_auxiliary_hdop;
-		report.vdop = _last_gnss_auxiliary_vdop;
-
-	} else {
-		// Using PDOP for HDOP and VDOP
-		// Relevant discussion: https://github.com/PX4/Firmware/issues/5153
-		report.hdop = msg.pdop;
-		report.vdop = msg.pdop;
-	}
+	// Using PDOP for HDOP and VDOP
+	// Relevant discussion: https://github.com/PX4/Firmware/issues/5153
+	report.hdop = msg.pdop;
+	report.vdop = msg.pdop;
 
 	report.heading = NAN;
 	report.heading_offset = NAN;
 
 	// Publish to a multi-topic
-	_gps_pub.publish(report);
+	int32_t gps_orb_instance;
+	orb_publish_auto(ORB_ID(vehicle_gps_position), &_report_pub, &report, &gps_orb_instance,
+			 ORB_PRIO_HIGH);
 
 	// Doing less time critical stuff here
 	if (_orb_to_uavcan_pub_timer.isRunning()) {
 		_orb_to_uavcan_pub_timer.stop();
-		PX4_INFO("GNSS ORB->UAVCAN bridge stopped, because there are other GNSS publishers");
+		PX4_WARN("GNSS ORB->UAVCAN bridge stopped, because there are other GNSS publishers");
 	}
 }
 
-void
-UavcanGnssBridge::broadcast_from_orb(const uavcan::TimerEvent &)
+void UavcanGnssBridge::broadcast_from_orb(const uavcan::TimerEvent &)
 {
-	vehicle_gps_position_s orb_msg{};
+	if (_orb_sub_gnss < 0) {
+		// ORB subscription stops working if this is relocated into init()
+		_orb_sub_gnss = orb_subscribe(ORB_ID(vehicle_gps_position));
 
-	if (!_orb_sub_gnss.update(&orb_msg)) {
+		if (_orb_sub_gnss < 0) {
+			PX4_WARN("GNSS ORB sub errno %d", errno);
+			return;
+		}
+
+		PX4_WARN("GNSS ORB fd %d", _orb_sub_gnss);
+	}
+
+	{
+		bool updated = false;
+		const int res = orb_check(_orb_sub_gnss, &updated);
+
+		if (res < 0) {
+			PX4_WARN("GNSS ORB check err %d %d", res, errno);
+			return;
+		}
+
+		if (!updated) {
+			return;
+		}
+	}
+
+	auto orb_msg = ::vehicle_gps_position_s();
+	const int res = orb_copy(ORB_ID(vehicle_gps_position), _orb_sub_gnss, &orb_msg);
+
+	if (res < 0) {
+		PX4_WARN("GNSS ORB read errno %d", errno);
 		return;
 	}
 
@@ -448,5 +462,5 @@ UavcanGnssBridge::broadcast_from_orb(const uavcan::TimerEvent &)
 	msg.pdop = (orb_msg.hdop > orb_msg.vdop) ? orb_msg.hdop : orb_msg.vdop;  // this is a hack :(
 
 	// Publishing now
-	_pub_fix2.broadcast(msg);
+	(void) _pub_fix2.broadcast(msg);
 }

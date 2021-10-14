@@ -33,7 +33,6 @@
 px4_add_module(
 	MODULE drivers__blinkm
 	MAIN blinkm
-	STACK_MAIN 1240
 	COMPILE_FLAGS
 	SRCS
 		blinkm.cpp

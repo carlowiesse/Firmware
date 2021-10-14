@@ -50,11 +50,14 @@
 
 #include <uORB/topics/sensor_gyro.h>
 
-/** gyro scaling factors; Vout = Vin + Voffset */
+/** gyro scaling factors; Vout = (Vin * Vscale) + Voffset */
 struct gyro_calibration_s {
 	float	x_offset;
+	float	x_scale;
 	float	y_offset;
+	float	y_scale;
 	float	z_offset;
+	float	z_scale;
 };
 
 /*

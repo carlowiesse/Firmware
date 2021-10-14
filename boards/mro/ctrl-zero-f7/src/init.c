@@ -35,7 +35,7 @@
  * @file init.c
  *
  * Board-specific early startup code.  This file implements the
- * board_app_initializ() function that is called early by nsh during startup.
+ * nsh_archinitialize() function that is called early by nsh during startup.
  *
  * Code here is run before the rcS script is invoked; it should start required
  * subsystems and perform board-specific initialisation.
@@ -65,13 +65,11 @@
 #include <arch/board/board.h>
 #include "up_internal.h"
 
-#include <px4_arch/io_timer.h>
 #include <drivers/drv_hrt.h>
 #include <drivers/drv_board_led.h>
 #include <systemlib/px4_macros.h>
-#include <px4_platform_common/init.h>
-#include <px4_platform/gpio.h>
-#include <px4_platform/board_dma_alloc.h>
+#include <px4_init.h>
+#include <drivers/boards/common/board_dma_alloc.h>
 
 /****************************************************************************
  * Pre-Processor Definitions
@@ -101,7 +99,7 @@ __END_DECLS
 __EXPORT void board_peripheral_reset(int ms)
 {
 	/* set the peripheral rails off */
-	board_control_spi_sensors_power(false, 0xffff);
+	VDD_3V3_SENSORS_EN(false);
 
 	bool last = READ_VDD_3V3_SPEKTRUM_POWER_EN();
 	/* Keep Spektum on to discharge rail*/
@@ -115,7 +113,7 @@ __EXPORT void board_peripheral_reset(int ms)
 
 	/* switch the peripheral rail back on */
 	VDD_3V3_SPEKTRUM_POWER_EN(last);
-	board_control_spi_sensors_power(true, 0xffff);
+	VDD_3V3_SENSORS_EN(true);
 }
 
 /************************************************************************************
@@ -131,9 +129,10 @@ __EXPORT void board_peripheral_reset(int ms)
  ************************************************************************************/
 __EXPORT void board_on_reset(int status)
 {
-	for (int i = 0; i < DIRECT_PWM_OUTPUT_CHANNELS; ++i) {
-		px4_arch_configgpio(PX4_MAKE_GPIO_INPUT(io_timer_channel_get_as_pwm_input(i)));
-	}
+	/* configure the GPIO pins to outputs and keep them low */
+
+	const uint32_t gpio[] = PX4_GPIO_PWM_INIT_LIST;
+	board_gpio_init(gpio, arraySize(gpio));
 
 	if (status >= 0) {
 		up_mdelay(6);
@@ -160,7 +159,7 @@ stm32_boardinitialize(void)
 
 	/* configure pins */
 	const uint32_t gpio[] = PX4_GPIO_INIT_LIST;
-	px4_gpio_init(gpio, arraySize(gpio));
+	board_gpio_init(gpio, arraySize(gpio));
 
 	/* configure SPI interfaces */
 	stm32_spiinitialize();
@@ -198,7 +197,7 @@ stm32_boardinitialize(void)
 __EXPORT int board_app_initialize(uintptr_t arg)
 {
 	/* Power on Interfaces */
-	board_control_spi_sensors_power(true, 0xffff);
+	VDD_3V3_SENSORS_EN(true);
 	VDD_3V3_SPEKTRUM_POWER_EN(true);
 
 	px4_platform_init();

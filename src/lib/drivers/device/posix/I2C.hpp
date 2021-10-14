@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2016-2020 PX4 Development Team. All rights reserved.
+ *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,7 +32,7 @@
  ****************************************************************************/
 
 /**
- * @file I2C.hpp
+ * @file i2c.h
  *
  * Base class for devices connected via I2C.
  */
@@ -41,7 +41,13 @@
 #define _DEVICE_I2C_H
 
 #include "../CDev.hpp"
-#include <px4_platform_common/i2c.h>
+
+#include <px4_i2c.h>
+
+#ifdef __PX4_LINUX
+#include <linux/i2c.h>
+#include <linux/i2c-dev.h>
+#endif
 
 namespace device __EXPORT
 {
@@ -54,13 +60,7 @@ class __EXPORT I2C : public CDev
 
 public:
 
-	// no copy, assignment, move, move assignment
-	I2C(const I2C &) = delete;
-	I2C &operator=(const I2C &) = delete;
-	I2C(I2C &&) = delete;
-	I2C &operator=(I2C &&) = delete;
-
-	virtual int	init() override;
+	virtual int	init();
 
 protected:
 	/**
@@ -78,7 +78,7 @@ protected:
 	 * @param address	I2C bus address, or zero if set_address will be used
 	 * @param frequency	I2C bus frequency for the device (currently not used)
 	 */
-	I2C(const char *name, const char *devname, const int bus, const uint16_t address, const uint32_t frequency);
+	I2C(const char *name, const char *devname, const int bus, const uint16_t address, const uint32_t frequency = 0);
 	virtual ~I2C();
 
 	/**
@@ -100,11 +100,13 @@ protected:
 	 */
 	int		transfer(const uint8_t *send, const unsigned send_len, uint8_t *recv, const unsigned recv_len);
 
-	virtual bool	external() const override { return px4_i2c_bus_external(_device_id.devid_s.bus); }
+	bool		external() { return px4_i2c_bus_external(_device_id.devid_s.bus); }
 
 private:
-	int			_fd{-1};
+	int 			_fd{-1};
 
+	I2C(const device::I2C &);
+	I2C operator=(const device::I2C &);
 };
 
 } // namespace device

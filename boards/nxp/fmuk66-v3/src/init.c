@@ -45,8 +45,7 @@
  * Included Files
  ****************************************************************************/
 
-#include <px4_platform_common/px4_config.h>
-#include <px4_platform/gpio.h>
+#include <px4_config.h>
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -63,7 +62,7 @@
 
 #include <kinetis.h>
 #include <kinetis_uart.h>
-#include <hardware/kinetis_uart.h>
+#include <chip/kinetis_uart.h>
 #include "board_config.h"
 
 #include "up_arch.h"
@@ -74,9 +73,8 @@
 
 #include <systemlib/px4_macros.h>
 
-#include <px4_arch/io_timer.h>
-#include <px4_platform_common/init.h>
-#include <px4_platform/board_dma_alloc.h>
+#include <px4_init.h>
+#include <drivers/boards/common/board_dma_alloc.h>
 
 /****************************************************************************
  * Pre-Processor Definitions
@@ -115,12 +113,10 @@ __END_DECLS
 
 void board_on_reset(int status)
 {
-	for (int i = 0; i < 6; ++i) {
-		px4_arch_configgpio(PX4_MAKE_GPIO_INPUT(io_timer_channel_get_as_pwm_input(i)));
-	}
+	/* configure the GPIO pins to outputs and keep them low */
 
-	px4_arch_configgpio(io_timer_channel_get_gpio_output(6)); // Echo trigger pin
-	px4_arch_configgpio(PX4_MAKE_GPIO_INPUT(io_timer_channel_get_as_pwm_input(7)));
+	const uint32_t gpio[] = PX4_GPIO_PWM_INIT_LIST;
+	board_gpio_init(gpio, arraySize(gpio));
 
 	if (status >= 0) {
 		up_mdelay(6);
@@ -182,7 +178,7 @@ kinetis_boardinitialize(void)
 	board_autoled_initialize();
 
 	const uint32_t gpio[] = PX4_GPIO_INIT_LIST;
-	px4_gpio_init(gpio, arraySize(gpio));
+	board_gpio_init(gpio, arraySize(gpio));
 
 	fmuk66_timer_initialize();
 

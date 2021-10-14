@@ -39,7 +39,8 @@
  */
 constexpr uint8_t MPU6000::_checked_registers[MPU6000_NUM_CHECKED_REGISTERS];
 
-MPU6000::MPU6000(device::Device *interface, enum Rotation rotation, int device_type) :
+MPU6000::MPU6000(device::Device *interface, const char *path, enum Rotation rotation, int device_type) :
+	CDev(path),
 	ScheduledWorkItem(MODULE_NAME, px4::device_bus_to_wq(interface->get_device_id())),
 	_interface(interface),
 	_device_type(device_type),
@@ -54,23 +55,23 @@ MPU6000::MPU6000(device::Device *interface, enum Rotation rotation, int device_t
 	switch (_device_type) {
 	default:
 	case MPU_DEVICE_TYPE_MPU6000:
-		_px4_accel.set_device_type(DRV_IMU_DEVTYPE_MPU6000);
-		_px4_gyro.set_device_type(DRV_IMU_DEVTYPE_MPU6000);
+		_px4_accel.set_device_type(DRV_ACC_DEVTYPE_MPU6000);
+		_px4_gyro.set_device_type(DRV_GYR_DEVTYPE_MPU6000);
 		break;
 
 	case MPU_DEVICE_TYPE_ICM20602:
-		_px4_accel.set_device_type(DRV_IMU_DEVTYPE_ICM20602);
-		_px4_gyro.set_device_type(DRV_IMU_DEVTYPE_ICM20602);
+		_px4_accel.set_device_type(DRV_ACC_DEVTYPE_ICM20602);
+		_px4_gyro.set_device_type(DRV_GYR_DEVTYPE_ICM20602);
 		break;
 
 	case MPU_DEVICE_TYPE_ICM20608:
-		_px4_accel.set_device_type(DRV_IMU_DEVTYPE_ICM20608);
-		_px4_gyro.set_device_type(DRV_IMU_DEVTYPE_ICM20608);
+		_px4_accel.set_device_type(DRV_ACC_DEVTYPE_ICM20608);
+		_px4_gyro.set_device_type(DRV_GYR_DEVTYPE_ICM20608);
 		break;
 
 	case MPU_DEVICE_TYPE_ICM20689:
-		_px4_accel.set_device_type(DRV_IMU_DEVTYPE_ICM20689);
-		_px4_gyro.set_device_type(DRV_IMU_DEVTYPE_ICM20689);
+		_px4_accel.set_device_type(DRV_ACC_DEVTYPE_ICM20689);
+		_px4_gyro.set_device_type(DRV_GYR_DEVTYPE_ICM20689);
 		break;
 	}
 }
@@ -96,7 +97,16 @@ MPU6000::init()
 
 	/* if probe failed, bail now */
 	if (ret != OK) {
-		PX4_DEBUG("probe init failed");
+		PX4_DEBUG("CDev init failed");
+		return ret;
+	}
+
+	/* do init */
+	ret = CDev::init();
+
+	/* if init failed, bail now */
+	if (ret != OK) {
+		PX4_DEBUG("CDev init failed");
 		return ret;
 	}
 
@@ -650,6 +660,13 @@ MPU6000::stop()
 }
 
 void
+MPU6000::Run()
+{
+	/* make another measurement */
+	measure();
+}
+
+void
 MPU6000::check_registers(void)
 {
 	/*
@@ -710,16 +727,17 @@ MPU6000::check_registers(void)
 	_checked_next = (_checked_next + 1) % MPU6000_NUM_CHECKED_REGISTERS;
 }
 
-void MPU6000::Run()
+int
+MPU6000::measure()
 {
 	if (_in_factory_test) {
 		// don't publish any data while in factory test mode
-		return;
+		return OK;
 	}
 
 	if (hrt_absolute_time() < _reset_wait) {
 		// we're waiting for a reset to complete
-		return;
+		return OK;
 	}
 
 	struct MPUReport mpu_report;
@@ -748,8 +766,7 @@ void MPU6000::Run()
 	if (sizeof(mpu_report) != _interface->read(MPU6000_SET_SPEED(MPUREG_INT_STATUS, MPU6000_HIGH_BUS_SPEED),
 			(uint8_t *)&mpu_report, sizeof(mpu_report))) {
 
-		perf_end(_sample_perf);
-		return;
+		return -EIO;
 	}
 
 	check_registers();
@@ -767,10 +784,8 @@ void MPU6000::Run()
 		perf_end(_sample_perf);
 		perf_count(_duplicates);
 		_got_duplicate = true;
-		return;
+		return OK;
 	}
-
-	perf_end(_sample_perf);
 
 	memcpy(&_last_accel[0], &mpu_report.accel_x[0], 6);
 	_got_duplicate = false;
@@ -799,19 +814,20 @@ void MPU6000::Run()
 
 		// all zero data - probably a SPI bus error
 		perf_count(_bad_transfers);
+		perf_end(_sample_perf);
 
 		// note that we don't call reset() here as a reset()
 		// costs 20ms with interrupts disabled. That means if
 		// the mpu6k does go bad it would cause a FMU failure,
 		// regardless of whether another sensor is available,
-		return;
+		return -EIO;
 	}
 
 	if (_register_wait != 0) {
 		// we are waiting for some good transfers before using
 		// the sensor again, don't return any data yet
 		_register_wait--;
-		return;
+		return OK;
 	}
 
 
@@ -870,6 +886,10 @@ void MPU6000::Run()
 
 	_px4_accel.update(timestamp_sample, report.accel_x, report.accel_y, report.accel_z);
 	_px4_gyro.update(timestamp_sample, report.gyro_x, report.gyro_y, report.gyro_z);
+
+	/* stop measuring */
+	perf_end(_sample_perf);
+	return OK;
 }
 
 void

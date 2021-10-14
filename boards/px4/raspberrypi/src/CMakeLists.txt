@@ -32,6 +32,5 @@
 ############################################################################
 
 add_library(drivers_board
-	i2c.cpp
-	spi.cpp
+	${PX4_SOURCE_DIR}/src/drivers/boards/common/board_identity.c # TODO: this is horrible and should be fixed
 )

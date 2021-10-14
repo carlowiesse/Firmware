@@ -44,7 +44,7 @@ ScheduledWorkItem::~ScheduledWorkItem()
 void
 ScheduledWorkItem::schedule_trampoline(void *arg)
 {
-	ScheduledWorkItem *dev = static_cast<ScheduledWorkItem *>(arg);
+	ScheduledWorkItem *dev = reinterpret_cast<ScheduledWorkItem *>(arg);
 	dev->ScheduleNow();
 }
 
@@ -66,9 +66,7 @@ ScheduledWorkItem::ScheduleOnInterval(uint32_t interval_us, uint32_t delay_us)
 void
 ScheduledWorkItem::ScheduleClear()
 {
-	// first clear any scheduled hrt call, then remove the item from the runnable queue
 	hrt_cancel(&_call);
-	WorkItem::ScheduleClear();
 }
 
 void

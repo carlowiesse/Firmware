@@ -39,6 +39,10 @@
  * @author Dennis Shtatnov <densht@gmail.com>
  */
 
+#include <nuttx/config.h>
+#include <parameters/param.h>
+
+
 /**
  * Operating channel of the NRF51
  *

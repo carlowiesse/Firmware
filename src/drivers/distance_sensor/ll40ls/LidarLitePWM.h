@@ -45,15 +45,14 @@
 
 #include "LidarLite.h"
 
+#include <stdio.h>
+#include <string.h>
+
+#include <drivers/drv_hrt.h>
+#include <drivers/drv_pwm_input.h>
+#include <px4_defines.h>
 #include <px4_platform_common/px4_work_queue/ScheduledWorkItem.hpp>
-
 #include <uORB/topics/pwm_input.h>
-#include <uORB/Subscription.hpp>
-#include <board_config.h>
-
-#if DIRECT_PWM_OUTPUT_CHANNELS >= 6
-#define GPIO_VDD_RANGEFINDER_EN_CHAN 5 // use pin 6
-#define LIDAR_LITE_PWM_SUPPORTED
 
 class LidarLitePWM : public LidarLite, public px4::ScheduledWorkItem
 {
@@ -65,6 +64,8 @@ public:
 	void start() override;
 	void stop() override;
 
+	void Run() override;
+
 protected:
 
 	int collect() override;
@@ -72,11 +73,7 @@ protected:
 
 private:
 
-	void Run() override;
-
-	uORB::Subscription _sub_pwm_input{ORB_ID(pwm_input)};
+	int _pwmSub{-1};
 
 	pwm_input_s _pwm{};
 };
-
-#endif

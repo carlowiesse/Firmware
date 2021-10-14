@@ -35,7 +35,7 @@
  * @file px4fmu_init.c
  *
  * PX4FMU-specific early startup code.  This file implements the
- * board_app_initializ() function that is called early by nsh during startup.
+ * nsh_archinitialize() function that is called early by nsh during startup.
  *
  * Code here is run before the rcS script is invoked; it should start required
  * subsystems and perform board-specific initialisation.
@@ -45,8 +45,8 @@
  * Included Files
  ****************************************************************************/
 
-#include <px4_platform_common/px4_config.h>
-#include <px4_platform_common/tasks.h>
+#include <px4_config.h>
+#include <px4_tasks.h>
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -73,9 +73,8 @@
 
 #include <systemlib/px4_macros.h>
 
-#include <px4_arch/io_timer.h>
-#include <px4_platform_common/init.h>
-#include <px4_platform/board_dma_alloc.h>
+#include <px4_init.h>
+#include <drivers/boards/common/board_dma_alloc.h>
 
 /****************************************************************************
  * Pre-Processor Definitions
@@ -110,7 +109,7 @@ __EXPORT void board_peripheral_reset(int ms)
 {
 	/* set the peripheral and sensor rails off */
 	stm32_gpiowrite(GPIO_VDD_3V3_PERIPH_EN, 0);
-	board_control_spi_sensors_power(false, 0xffff);
+	stm32_gpiowrite(GPIO_VDD_3V3_SENSORS_EN, 0);
 	stm32_gpiowrite(GPIO_VDD_5V_PERIPH_EN, 1);
 	stm32_gpiowrite(GPIO_VDD_5V_HIPOWER_EN, 1);
 
@@ -128,7 +127,7 @@ __EXPORT void board_peripheral_reset(int ms)
 	/* switch the peripheral rail back on */
 //	stm32_gpiowrite(GPIO_SPEKTRUM_PWR_EN, last);
 	stm32_gpiowrite(GPIO_VDD_3V3_PERIPH_EN, 1);
-	board_control_spi_sensors_power(true, 0xffff);
+	stm32_gpiowrite(GPIO_VDD_3V3_SENSORS_EN, 1);
 	stm32_gpiowrite(GPIO_VDD_5V_PERIPH_EN, 0);
 	stm32_gpiowrite(GPIO_VDD_5V_HIPOWER_EN, 0);
 }
@@ -146,10 +145,15 @@ __EXPORT void board_peripheral_reset(int ms)
  ************************************************************************************/
 __EXPORT void board_on_reset(int status)
 {
+	UNUSED(status);
 	/* configure the GPIO pins to outputs and keep them low */
-	for (int i = 0; i < DIRECT_PWM_OUTPUT_CHANNELS; ++i) {
-		px4_arch_configgpio(io_timer_channel_get_gpio_output(i));
-	}
+
+	stm32_configgpio(GPIO_GPIO0_OUTPUT);
+	stm32_configgpio(GPIO_GPIO1_OUTPUT);
+	stm32_configgpio(GPIO_GPIO2_OUTPUT);
+	stm32_configgpio(GPIO_GPIO3_OUTPUT);
+	stm32_configgpio(GPIO_GPIO4_OUTPUT);
+	stm32_configgpio(GPIO_GPIO5_OUTPUT);
 
 	/* On resets invoked from system (not boot) insure we establish a low
 	 * output state (discharge the pins) on PWM pins before they become inputs.
@@ -191,7 +195,7 @@ stm32_boardinitialize(void)
 	board_autoled_initialize();
 
 	/* Start with Power off */
-	board_control_spi_sensors_power_configgpio();
+	stm32_configgpio(GPIO_VDD_3V3_SENSORS_EN);
 
 	/* configure ADC pins */
 	stm32_configgpio(GPIO_ADC1_IN2);	/* BATT_VOLTAGE_SENS */
@@ -270,13 +274,13 @@ static struct sdio_dev_s *sdio;
 
 __EXPORT int board_app_initialize(uintptr_t arg)
 {
+	/* Bring up the Sensor power */
+
+	stm32_gpiowrite(GPIO_VDD_3V3_SENSORS_EN, 1);
 
 	/* Now it is ok to drvie the pins high
 	 * so configure SPI CPIO */
 
-	// the temp cal eeprom is unused, so disable the CS from here
-	stm32_configgpio(GPIO_SPI_CS_TEMPCAL_EEPROM);
-	stm32_gpiowrite(GPIO_SPI_CS_TEMPCAL_EEPROM, 1);
 	stm32_spiinitialize();
 
 	px4_platform_init();
@@ -316,10 +320,10 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 
 	/* Configure SPI-based devices */
 
-	spi1 = stm32_spibus_initialize(1);
+	spi1 = stm32_spibus_initialize(PX4_SPI_BUS_SENSORS);
 
 	if (!spi1) {
-		syslog(LOG_ERR, "[boot] FAILED to initialize SPI port %d\n", 1);
+		syslog(LOG_ERR, "[boot] FAILED to initialize SPI port %d\n", PX4_SPI_BUS_SENSORS);
 		led_on(LED_RED);
 		return -ENODEV;
 	}
@@ -328,7 +332,7 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 	SPI_SETFREQUENCY(spi1, 10000000);
 	SPI_SETBITS(spi1, 8);
 	SPI_SETMODE(spi1, SPIDEV_MODE3);
-	SPI_SELECT(spi1, PX4_SPIDEV_ICM_20602, false);
+	SPI_SELECT(spi1, PX4_SPIDEV_ICM, false);
 	SPI_SELECT(spi1, PX4_SPIDEV_BARO, false);
 	SPI_SELECT(spi1, PX4_SPIDEV_LIS, false);
 	SPI_SELECT(spi1, PX4_SPIDEV_MPU, false);
@@ -337,10 +341,10 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 
 	/* Get the SPI port for the FRAM */
 
-	spi2 = stm32_spibus_initialize(2);
+	spi2 = stm32_spibus_initialize(PX4_SPI_BUS_RAMTRON);
 
 	if (!spi2) {
-		syslog(LOG_ERR, "[boot] FAILED to initialize SPI port %d\n", 2);
+		syslog(LOG_ERR, "[boot] FAILED to initialize SPI port %d\n", PX4_SPI_BUS_RAMTRON);
 		led_on(LED_RED);
 		return -ENODEV;
 	}
@@ -356,10 +360,10 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 
 	/* Configure SPI 5-based devices */
 
-	spi5 = stm32_spibus_initialize(5);
+	spi5 = stm32_spibus_initialize(PX4_SPI_BUS_EXT0);
 
 	if (!spi5) {
-		syslog(LOG_ERR, "[boot] FAILED to initialize SPI port %d\n", 5);
+		syslog(LOG_ERR, "[boot] FAILED to initialize SPI port %d\n", PX4_SPI_BUS_EXT0);
 		led_on(LED_RED);
 		return -ENODEV;
 	}
@@ -372,10 +376,10 @@ __EXPORT int board_app_initialize(uintptr_t arg)
 
 	/* Configure SPI 6-based devices */
 
-	spi6 = stm32_spibus_initialize(6);
+	spi6 = stm32_spibus_initialize(PX4_SPI_BUS_EXT1);
 
 	if (!spi6) {
-		syslog(LOG_ERR, "[boot] FAILED to initialize SPI port %d\n", 6);
+		syslog(LOG_ERR, "[boot] FAILED to initialize SPI port %d\n", PX4_SPI_BUS_EXT1);
 		led_on(LED_RED);
 		return -ENODEV;
 	}

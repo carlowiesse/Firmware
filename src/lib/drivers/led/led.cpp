@@ -37,7 +37,7 @@
  * LED driver to control the onboard LED(s) via ioctl interface.
  */
 
-#include <px4_platform_common/px4_config.h>
+#include <px4_config.h>
 #include <lib/cdev/CDev.hpp>
 #include <drivers/drv_board_led.h>
 #include <stdio.h>
@@ -60,10 +60,10 @@ class LED : cdev::CDev
 {
 public:
 	LED();
-	~LED() override = default;
+	virtual ~LED() = default;
 
-	int	init() override;
-	int	ioctl(cdev::file_t *filp, int cmd, unsigned long arg) override;
+	virtual int		init();
+	virtual int		ioctl(cdev::file_t *filp, int cmd, unsigned long arg);
 };
 
 LED::LED() : CDev(LED0_DEVICE_PATH)

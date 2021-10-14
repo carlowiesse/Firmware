@@ -36,8 +36,8 @@
 
 #include <string.h>
 
-#include <px4_platform_common/tasks.h>
-#include <px4_platform_common/time.h>
+#include <px4_tasks.h>
+#include <px4_time.h>
 #include <drivers/drv_hrt.h>
 
 namespace px4
@@ -160,7 +160,6 @@ WorkQueue::Run()
 			work_unlock(); // unlock work queue to run (item may requeue itself)
 			work->RunPreamble();
 			work->Run();
-			// Note: after Run() we cannot access work anymore, as it might have been deleted
 			work_lock(); // re-lock
 		}
 

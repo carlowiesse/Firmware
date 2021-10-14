@@ -63,31 +63,41 @@ struct spi_calibration_s {
 class BMP388_SPI: public device::SPI, public IBMP388
 {
 public:
-	BMP388_SPI(uint8_t bus, uint32_t device);
+	BMP388_SPI(uint8_t bus, uint32_t device, bool is_external_device);
 	virtual ~BMP388_SPI() = default;
 
+	bool is_external();
 	int init();
 
 	uint8_t get_reg(uint8_t addr);
 	int get_reg_buf(uint8_t addr, uint8_t *buf, uint8_t len);
 	int set_reg(uint8_t value, uint8_t addr);
+	data_s *get_data(uint8_t addr);
 	calibration_s *get_calibration(uint8_t addr);
 
 	uint32_t get_device_id() const override { return device::SPI::get_device_id(); }
 
 private:
 	spi_calibration_s _cal;
+	spi_data_s _data;
+	bool _external;
 };
 
-IBMP388 *bmp388_spi_interface(uint8_t busnum, uint32_t device)
+IBMP388 *bmp388_spi_interface(uint8_t busnum, uint32_t device, bool external)
 {
-	return new BMP388_SPI(busnum, device);
+	return new BMP388_SPI(busnum, device, external);
 }
 
-BMP388_SPI::BMP388_SPI(uint8_t bus, uint32_t device) :
+BMP388_SPI::BMP388_SPI(uint8_t bus, uint32_t device, bool is_external_device) :
 	SPI("BMP388_SPI", nullptr, bus, device, SPIDEV_MODE3, 10 * 1000 * 1000)
 {
+	_external = is_external_device;
 }
+
+bool BMP388_SPI::is_external()
+{
+	return _external;
+};
 
 int BMP388_SPI::init()
 {
@@ -112,6 +122,18 @@ int BMP388_SPI::set_reg(uint8_t value, uint8_t addr)
 {
 	uint8_t cmd[2] = { (uint8_t)(addr & DIR_WRITE), value}; //clear MSB bit
 	return transfer(&cmd[0], nullptr, 2);
+}
+
+data_s *BMP388_SPI::get_data(uint8_t addr)
+{
+	_data.addr = (uint8_t)(addr | DIR_READ); //set MSB bit
+
+	if (transfer((uint8_t *)&_data, (uint8_t *)&_data, sizeof(struct spi_data_s)) == OK) {
+		return &(_data.data);
+
+	} else {
+		return nullptr;
+	}
 }
 
 calibration_s *BMP388_SPI::get_calibration(uint8_t addr)

@@ -7,6 +7,7 @@ px4_add_board(
 	TOOLCHAIN arm-none-eabi
 	ARCHITECTURE cortex-m7
 	ROMFSROOT px4fmu_common
+
 	SERIAL_PORTS
 		TEL1:/dev/ttyS0 # UART1
 		TEL2:/dev/ttyS1 # UART2
@@ -14,6 +15,7 @@ px4_add_board(
 		GPS1:/dev/ttyS3 # UART4
 		RC:/dev/ttyS4 # UART6
 		# /dev/ttyS5: UART7 (ESC telemetry)
+
 	DRIVERS
 		adc
 		barometer/bmp280
@@ -22,31 +24,29 @@ px4_add_board(
 		imu/mpu6000
 		magnetometer
 		optical_flow/px4flow
-		osd
 		pwm_out_sim
 		px4fmu
 		rc_input
 		telemetry
 		tone_alarm
+		osd
+
 	MODULES
 		attitude_estimator_q
-		battery_status
 		commander
 		dataman
 		#ekf2
 		events
 		land_detector
 		load_mon
-		#local_position_estimator
 		logger
 		mavlink
 		mc_att_control
 		mc_pos_control
-		mc_rate_control
 		navigator
-		rc_update
+		battery_status
 		sensors
-		#temperature_compensation
+
 	SYSTEMCMDS
 		bl_update
 		config
@@ -54,7 +54,6 @@ px4_add_board(
 		dumpfile
 		esc_calib
 		hardfault_log
-		i2cdetect
 		led_control
 		mixer
 		#motor_ramp
@@ -68,9 +67,10 @@ px4_add_board(
 		sd_bench
 		shutdown
 		top
-		topic_listener
 		tune_control
+		topic_listener
 		usb_connected
 		ver
 		work_queue
+
 	)

@@ -66,7 +66,7 @@ public:
 	// Reset the filter state to this value
 	float reset(float sample);
 
-protected:
+private:
 
 	float _cutoff_freq{0.0f};
 

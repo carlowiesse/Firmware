@@ -39,19 +39,19 @@
  */
 
 #include <drivers/drv_hrt.h>
-#include <px4_platform_common/px4_config.h>
-#include <px4_platform_common/getopt.h>
-#include <px4_platform_common/log.h>
-#include <px4_platform_common/module.h>
+#include <px4_config.h>
+#include <px4_getopt.h>
+#include <px4_log.h>
+#include <px4_module.h>
 #include <uORB/PublicationQueued.hpp>
 #include <uORB/topics/test_motor.h>
 
 extern "C" __EXPORT int motor_test_main(int argc, char *argv[]);
 
-static void motor_test(unsigned channel, float value, uint8_t driver_instance, int timeout_ms);
+static void motor_test(unsigned channel, float value, uint8_t driver_instance);
 static void usage(const char *reason);
 
-void motor_test(unsigned channel, float value, uint8_t driver_instance, int timeout_ms)
+void motor_test(unsigned channel, float value, uint8_t driver_instance)
 {
 	test_motor_s test_motor{};
 	test_motor.timestamp = hrt_absolute_time();
@@ -59,7 +59,6 @@ void motor_test(unsigned channel, float value, uint8_t driver_instance, int time
 	test_motor.value = value;
 	test_motor.action = value >= 0.f ? test_motor_s::ACTION_RUN : test_motor_s::ACTION_STOP;
 	test_motor.driver_instance = driver_instance;
-	test_motor.timeout_ms = timeout_ms;
 
 	uORB::PublicationQueued<test_motor_s> test_motor_pub{ORB_ID(test_motor)};
 	test_motor_pub.publish(test_motor);
@@ -74,7 +73,7 @@ void motor_test(unsigned channel, float value, uint8_t driver_instance, int time
 
 static void usage(const char *reason)
 {
-	if (reason != nullptr) {
+	if (reason != NULL) {
 		PX4_WARN("%s", reason);
 	}
 
@@ -83,13 +82,14 @@ static void usage(const char *reason)
 Utility to test motors.
 
 WARNING: remove all props before using this command.
+
+Note: this can only be used for drivers which support the motor_test uorb topic (not px4io).
 )DESCR_STR");
 
 	PRINT_MODULE_USAGE_NAME("motor_test", "command");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("test", "Set motor(s) to a specific output value");
 	PRINT_MODULE_USAGE_PARAM_INT('m', -1, 0, 7, "Motor to test (0...7, all if not specified)", true);
 	PRINT_MODULE_USAGE_PARAM_INT('p', 0, 0, 100, "Power (0...100)", true);
-	PRINT_MODULE_USAGE_PARAM_INT('t', 0, 0, 100, "Timeout in seconds (default=no timeout)", true);
 	PRINT_MODULE_USAGE_PARAM_INT('i', 0, 0, 4, "driver instance", true);
 	PRINT_MODULE_USAGE_COMMAND_DESCR("stop", "Stop all motors");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("iterate", "Iterate all motors starting and stopping one after the other");
@@ -103,26 +103,25 @@ int motor_test_main(int argc, char *argv[])
 	float value = 0.0f;
 	uint8_t driver_instance = 0;
 	int ch;
-	int timeout_ms = 0;
 
 	int myoptind = 1;
-	const char *myoptarg = nullptr;
+	const char *myoptarg = NULL;
 
-	while ((ch = px4_getopt(argc, argv, "i:m:p:t:", &myoptind, &myoptarg)) != EOF) {
+	while ((ch = px4_getopt(argc, argv, "i:m:p:", &myoptind, &myoptarg)) != EOF) {
 		switch (ch) {
 
 		case 'i':
-			driver_instance = (uint8_t)strtol(myoptarg, nullptr, 0);
+			driver_instance = (uint8_t)strtol(myoptarg, NULL, 0);
 			break;
 
 		case 'm':
 			/* Read in motor number */
-			channel = (int)strtol(myoptarg, nullptr, 0);
+			channel = (int)strtol(myoptarg, NULL, 0);
 			break;
 
 		case 'p':
 			/* Read in power value */
-			lval = strtoul(myoptarg, nullptr, 0);
+			lval = strtoul(myoptarg, NULL, 0);
 
 			if (lval > 100) {
 				usage("value invalid");
@@ -132,12 +131,8 @@ int motor_test_main(int argc, char *argv[])
 			value = ((float)lval) / 100.f;
 			break;
 
-		case 't':
-			timeout_ms = strtol(myoptarg, nullptr, 0) * 1000;
-			break;
-
 		default:
-			usage(nullptr);
+			usage(NULL);
 			return 1;
 		}
 	}
@@ -153,9 +148,9 @@ int motor_test_main(int argc, char *argv[])
 			value = 0.15f;
 
 			for (int i = 0; i < 8; ++i) {
-				motor_test(i, value, driver_instance, 0);
+				motor_test(i, value, driver_instance);
 				px4_usleep(500000);
-				motor_test(i, -1.f, driver_instance, 0);
+				motor_test(i, -1.f, driver_instance);
 				px4_usleep(10000);
 			}
 
@@ -164,24 +159,24 @@ int motor_test_main(int argc, char *argv[])
 		} else if (strcmp("test", argv[myoptind]) == 0) {
 			// nothing to do
 		} else {
-			usage(nullptr);
+			usage(NULL);
 			return 0;
 		}
 
 	} else {
-		usage(nullptr);
+		usage(NULL);
 		return 0;
 	}
 
 	if (run_test) {
 		if (channel < 0) {
 			for (int i = 0; i < 8; ++i) {
-				motor_test(i, value, driver_instance, timeout_ms);
+				motor_test(i, value, driver_instance);
 				px4_usleep(10000);
 			}
 
 		} else {
-			motor_test(channel, value, driver_instance, timeout_ms);
+			motor_test(channel, value, driver_instance);
 		}
 	}
 

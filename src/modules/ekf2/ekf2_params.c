@@ -153,7 +153,7 @@ PARAM_DEFINE_FLOAT(EKF2_AVEL_DELAY, 5);
  *
  * Set bits to 1 to enable checks. Checks enabled by the following bit positions
  * 0 : Minimum required sat count set by EKF2_REQ_NSATS
- * 1 : Minimum required PDOP set by EKF2_REQ_PDOP
+ * 1 : Minimum required GDoP set by EKF2_REQ_GDOP
  * 2 : Maximum allowed horizontal position error set by EKF2_REQ_EPH
  * 3 : Maximum allowed vertical position error set by EKF2_REQ_EPV
  * 4 : Maximum allowed speed error set by EKF2_REQ_SACC
@@ -166,7 +166,7 @@ PARAM_DEFINE_FLOAT(EKF2_AVEL_DELAY, 5);
  * @min 0
  * @max 511
  * @bit 0 Min sat count (EKF2_REQ_NSATS)
- * @bit 1 Min PDOP (EKF2_REQ_PDOP)
+ * @bit 1 Min GDoP (EKF2_REQ_GDOP)
  * @bit 2 Max horizontal position error (EKF2_REQ_EPH)
  * @bit 3 Max vertical position error (EKF2_REQ_EPV)
  * @bit 4 Max speed error (EKF2_REQ_SACC)
@@ -220,14 +220,14 @@ PARAM_DEFINE_FLOAT(EKF2_REQ_SACC, 0.5f);
 PARAM_DEFINE_INT32(EKF2_REQ_NSATS, 6);
 
 /**
- * Required PDOP to use GPS.
+ * Required GDoP to use GPS.
  *
  * @group EKF2
  * @min 1.5
  * @max 5.0
  * @decimal 1
  */
-PARAM_DEFINE_FLOAT(EKF2_REQ_PDOP, 2.5f);
+PARAM_DEFINE_FLOAT(EKF2_REQ_GDOP, 2.5f);
 
 /**
  * Maximum horizontal drift speed to use GPS.
@@ -712,7 +712,7 @@ PARAM_DEFINE_FLOAT(EKF2_MIN_RNG, 0.1f);
 PARAM_DEFINE_INT32(EKF2_EV_NOISE_MD, 0);
 
 /**
- * Measurement noise for vision position observations used to lower bound or replace the uncertainty included in the message
+ * Measurement noise for vision position observations used when the vision system does not supply error estimates
  *
  * @group EKF2
  * @min 0.01
@@ -722,7 +722,7 @@ PARAM_DEFINE_INT32(EKF2_EV_NOISE_MD, 0);
 PARAM_DEFINE_FLOAT(EKF2_EVP_NOISE, 0.1f);
 
 /**
- * Measurement noise for vision velocity observations used to lower bound or replace the uncertainty included in the message
+ * Measurement noise for vision velocity observations used when the vision system does not supply error estimates
  *
  * @group EKF2
  * @min 0.01
@@ -732,7 +732,7 @@ PARAM_DEFINE_FLOAT(EKF2_EVP_NOISE, 0.1f);
 PARAM_DEFINE_FLOAT(EKF2_EVV_NOISE, 0.1f);
 
 /**
- * Measurement noise for vision angle observations used to lower bound or replace the uncertainty included in the message
+ * Measurement noise for vision angle observations used when the vision system does not supply error estimates
  *
  * @group EKF2
  * @min 0.01
@@ -806,20 +806,7 @@ PARAM_DEFINE_FLOAT(EKF2_TERR_NOISE, 5.0f);
 PARAM_DEFINE_FLOAT(EKF2_TERR_GRAD, 0.5f);
 
 /**
- * Device id of IMU
- *
- * Set to 0 to use system selected (sensor_combined) IMU,
- * otherwise set to the device id of the desired IMU (vehicle_imu).
- *
- * @group EKF2
- * @value 0 System Primary
- * @category Developer
- *
- */
-PARAM_DEFINE_INT32(EKF2_IMU_ID, 0);
-
-/**
- * X position of IMU in body frame (forward axis with origin relative to vehicle centre of gravity)
+ * X position of IMU in body frame
  *
  * @group EKF2
  * @unit m
@@ -828,7 +815,7 @@ PARAM_DEFINE_INT32(EKF2_IMU_ID, 0);
 PARAM_DEFINE_FLOAT(EKF2_IMU_POS_X, 0.0f);
 
 /**
- * Y position of IMU in body frame (right axis with origin relative to vehicle centre of gravity)
+ * Y position of IMU in body frame
  *
  * @group EKF2
  * @unit m
@@ -837,7 +824,7 @@ PARAM_DEFINE_FLOAT(EKF2_IMU_POS_X, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_IMU_POS_Y, 0.0f);
 
 /**
- * Z position of IMU in body frame (down axis with origin relative to vehicle centre of gravity)
+ * Z position of IMU in body frame
  *
  * @group EKF2
  * @unit m
@@ -846,7 +833,7 @@ PARAM_DEFINE_FLOAT(EKF2_IMU_POS_Y, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_IMU_POS_Z, 0.0f);
 
 /**
- * X position of GPS antenna in body frame (forward axis with origin relative to vehicle centre of gravity)
+ * X position of GPS antenna in body frame
  *
  * @group EKF2
  * @unit m
@@ -855,7 +842,7 @@ PARAM_DEFINE_FLOAT(EKF2_IMU_POS_Z, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_GPS_POS_X, 0.0f);
 
 /**
- * Y position of GPS antenna in body frame (right axis with origin relative to vehicle centre of gravity)
+ * Y position of GPS antenna in body frame
  *
  * @group EKF2
  * @unit m
@@ -864,7 +851,7 @@ PARAM_DEFINE_FLOAT(EKF2_GPS_POS_X, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_GPS_POS_Y, 0.0f);
 
 /**
- * Z position of GPS antenna in body frame (down axis with origin relative to vehicle centre of gravity)
+ * Z position of GPS antenna in body frame
  *
  * @group EKF2
  * @unit m
@@ -873,7 +860,7 @@ PARAM_DEFINE_FLOAT(EKF2_GPS_POS_Y, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_GPS_POS_Z, 0.0f);
 
 /**
- * X position of range finder origin in body frame (forward axis with origin relative to vehicle centre of gravity)
+ * X position of range finder origin in body frame
  *
  * @group EKF2
  * @unit m
@@ -882,7 +869,7 @@ PARAM_DEFINE_FLOAT(EKF2_GPS_POS_Z, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_RNG_POS_X, 0.0f);
 
 /**
- * Y position of range finder origin in body frame (right axis with origin relative to vehicle centre of gravity)
+ * Y position of range finder origin in body frame
  *
  * @group EKF2
  * @unit m
@@ -891,7 +878,7 @@ PARAM_DEFINE_FLOAT(EKF2_RNG_POS_X, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_RNG_POS_Y, 0.0f);
 
 /**
- * Z position of range finder origin in body frame (down axis with origin relative to vehicle centre of gravity)
+ * Z position of range finder origin in body frame
  *
  * @group EKF2
  * @unit m
@@ -900,7 +887,7 @@ PARAM_DEFINE_FLOAT(EKF2_RNG_POS_Y, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_RNG_POS_Z, 0.0f);
 
 /**
- * X position of optical flow focal point in body frame (forward axis with origin relative to vehicle centre of gravity)
+ * X position of optical flow focal point in body frame
  *
  * @group EKF2
  * @unit m
@@ -909,7 +896,7 @@ PARAM_DEFINE_FLOAT(EKF2_RNG_POS_Z, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_OF_POS_X, 0.0f);
 
 /**
- * Y position of optical flow focal point in body frame (right axis with origin relative to vehicle centre of gravity)
+ * Y position of optical flow focal point in body frame
  *
  * @group EKF2
  * @unit m
@@ -918,7 +905,7 @@ PARAM_DEFINE_FLOAT(EKF2_OF_POS_X, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_OF_POS_Y, 0.0f);
 
 /**
- * Z position of optical flow focal point in body frame (down axis with origin relative to vehicle centre of gravity)
+ * Z position of optical flow focal point in body frame
  *
  * @group EKF2
  * @unit m
@@ -927,7 +914,7 @@ PARAM_DEFINE_FLOAT(EKF2_OF_POS_Y, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_OF_POS_Z, 0.0f);
 
 /**
-* X position of VI sensor focal point in body frame (forward axis with origin relative to vehicle centre of gravity)
+* X position of VI sensor focal point in body frame
  *
  * @group EKF2
  * @unit m
@@ -936,7 +923,7 @@ PARAM_DEFINE_FLOAT(EKF2_OF_POS_Z, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_EV_POS_X, 0.0f);
 
 /**
- * Y position of VI sensor focal point in body frame (right axis with origin relative to vehicle centre of gravity)
+ * Y position of VI sensor focal point in body frame
  *
  * @group EKF2
  * @unit m
@@ -945,7 +932,7 @@ PARAM_DEFINE_FLOAT(EKF2_EV_POS_X, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_EV_POS_Y, 0.0f);
 
 /**
- * Z position of VI sensor focal point in body frame (down axis with origin relative to vehicle centre of gravity)
+ * Z position of VI sensor focal point in body frame
  *
  * @group EKF2
  * @unit m
@@ -1416,17 +1403,3 @@ PARAM_DEFINE_FLOAT(EKF2_MOVE_TEST, 1.0f);
  * @reboot_required true
  */
 PARAM_DEFINE_FLOAT(EKF2_REQ_GPS_H, 10.0f);
-
-/**
- * Magnetic field strength test selection
- *
- * When set, the EKF checks the strength of the magnetic field
- * to decide whether the magnetometer data is valid.
- * If GPS data is received, the magnetic field is compared to a World
- * Magnetic Model (WMM), otherwise an average value is used.
- * This check is useful to reject occasional hard iron disturbance.
- *
- * @group EKF2
- * @boolean
- */
-PARAM_DEFINE_INT32(EKF2_MAG_CHECK, 0);

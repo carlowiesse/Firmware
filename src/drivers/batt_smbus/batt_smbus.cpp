@@ -43,13 +43,24 @@
 
 #include "batt_smbus.h"
 
-#include <lib/parameters/param.h>
-
 extern "C" __EXPORT int batt_smbus_main(int argc, char *argv[]);
 
 BATT_SMBUS::BATT_SMBUS(SMBus *interface, const char *path) :
 	ScheduledWorkItem(MODULE_NAME, px4::device_bus_to_wq(interface->get_device_id())),
-	_interface(interface)
+	_interface(interface),
+	_cycle(perf_alloc(PC_ELAPSED, "batt_smbus_cycle")),
+	_batt_topic(nullptr),
+	_cell_count(4),
+	_batt_capacity(0),
+	_batt_startup_capacity(0),
+	_cycle_count(0),
+	_serial_number(0),
+	_crit_thr(0.0f),
+	_emergency_thr(0.0f),
+	_low_thr(0.0f),
+	_manufacturer_name(nullptr),
+	_lifetime_max_delta_cell_voltage(0.0f),
+	_cell_undervoltage_protection_status(1)
 {
 	battery_status_s new_report = {};
 	_batt_topic = orb_advertise(ORB_ID(battery_status), &new_report);
@@ -79,6 +90,8 @@ BATT_SMBUS::~BATT_SMBUS()
 
 	int battsource = 0;
 	param_set(param_find("BAT_SOURCE"), &battsource);
+
+	PX4_WARN("Exiting.");
 }
 
 int BATT_SMBUS::task_spawn(int argc, char *argv[])
@@ -89,7 +102,7 @@ int BATT_SMBUS::task_spawn(int argc, char *argv[])
 	int ch;
 	const char *myoptarg = nullptr;
 
-	while ((ch = px4_getopt(argc, argv, "XTRIA", &myoptind, &myoptarg)) != EOF) {
+	while ((ch = px4_getopt(argc, argv, "XTRIA:", &myoptind, &myoptarg)) != EOF) {
 		switch (ch) {
 		case 'X':
 			busid = BATT_SMBUS_BUS_I2C_EXTERNAL;
@@ -119,23 +132,22 @@ int BATT_SMBUS::task_spawn(int argc, char *argv[])
 
 	for (unsigned i = 0; i < NUM_BUS_OPTIONS; i++) {
 
-		if (!is_running() && (busid == BATT_SMBUS_BUS_ALL || smbus_bus_options[i].busid == busid)) {
+		if (!is_running() && (busid == BATT_SMBUS_BUS_ALL || bus_options[i].busid == busid)) {
 
-			SMBus *interface = new SMBus(smbus_bus_options[i].busnum, BATT_SMBUS_ADDR);
-			BATT_SMBUS *dev = new BATT_SMBUS(interface, smbus_bus_options[i].devpath);
-
-			int result = dev->get_startup_info();
-
-			if (result != PX4_OK) {
-				delete dev;
-				continue;
-			}
+			SMBus *interface = new SMBus(bus_options[i].busnum, BATT_SMBUS_ADDR);
+			BATT_SMBUS *dev = new BATT_SMBUS(interface, bus_options[i].devpath);
 
 			// Successful read of device type, we've found our battery
 			_object.store(dev);
 			_task_id = task_id_is_work_queue;
 
-			dev->ScheduleOnInterval(BATT_SMBUS_MEASUREMENT_INTERVAL_US);
+			int result = dev->get_startup_info();
+
+			if (result != PX4_OK) {
+				return PX4_ERROR;
+			}
+
+			dev->ScheduleNow();
 
 			return PX4_OK;
 
@@ -148,12 +160,6 @@ int BATT_SMBUS::task_spawn(int argc, char *argv[])
 
 void BATT_SMBUS::Run()
 {
-	if (should_exit()) {
-		ScheduleClear();
-		exit_and_cleanup();
-		return;
-	}
-
 	// Get the current time.
 	uint64_t now = hrt_absolute_time();
 
@@ -251,16 +257,29 @@ void BATT_SMBUS::Run()
 
 		_last_report = new_report;
 	}
+
+	if (should_exit()) {
+		exit_and_cleanup();
+
+	} else {
+
+		while (_should_suspend) {
+			px4_usleep(200000);
+		}
+
+		// Schedule a fresh cycle call when the measurement is done.
+		ScheduleDelayed(BATT_SMBUS_MEASUREMENT_INTERVAL_US);
+	}
 }
 
 void BATT_SMBUS::suspend()
 {
-	ScheduleClear();
+	_should_suspend = true;
 }
 
 void BATT_SMBUS::resume()
 {
-	ScheduleOnInterval(BATT_SMBUS_MEASUREMENT_INTERVAL_US);
+	_should_suspend = false;
 }
 
 int BATT_SMBUS::get_cell_voltages()
@@ -339,17 +358,23 @@ void BATT_SMBUS::set_undervoltage_protection(float average_current)
 }
 
 //@NOTE: Currently unused, could be helpful for debugging a parameter set though.
-int BATT_SMBUS::dataflash_read(uint16_t &address, void *data, const unsigned length)
+int BATT_SMBUS::dataflash_read(uint16_t &address, void *data)
 {
 	uint8_t code = BATT_SMBUS_MANUFACTURER_BLOCK_ACCESS;
 
+	// address is 2 bytes
 	int result = _interface->block_write(code, &address, 2, true);
 
 	if (result != PX4_OK) {
 		return result;
 	}
 
-	result = _interface->block_read(code, data, length, true);
+	// @NOTE: The data buffer MUST be 32 bytes.
+	result = _interface->block_read(code, data, DATA_BUFFER_SIZE + 2, true);
+
+	// When reading a BATT_SMBUS_MANUFACTURER_BLOCK_ACCESS the first 2 bytes will be the command code
+	// We will remove these since we do not care about the command code.
+	//memcpy(data, &((uint8_t *)data)[2], DATA_BUFFER_SIZE);
 
 	return result;
 }
@@ -358,15 +383,10 @@ int BATT_SMBUS::dataflash_write(uint16_t &address, void *data, const unsigned le
 {
 	uint8_t code = BATT_SMBUS_MANUFACTURER_BLOCK_ACCESS;
 
-	uint8_t tx_buf[MAC_DATA_BUFFER_SIZE + 2] = {};
+	uint8_t tx_buf[DATA_BUFFER_SIZE + 2] = {};
 
 	tx_buf[0] = ((uint8_t *)&address)[0];
 	tx_buf[1] = ((uint8_t *)&address)[1];
-
-	if (length > MAC_DATA_BUFFER_SIZE) {
-		return PX4_ERROR;
-	}
-
 	memcpy(&tx_buf[2], data, length);
 
 	// code (1), byte_count (1), addr(2), data(32) + pec
@@ -474,6 +494,11 @@ int BATT_SMBUS::manufacturer_name(uint8_t *man_name, const uint8_t length)
 	return result;
 }
 
+void BATT_SMBUS::print_report()
+{
+	print_message(_last_report);
+}
+
 int BATT_SMBUS::manufacturer_read(const uint16_t cmd_code, void *data, const unsigned length)
 {
 	uint8_t code = BATT_SMBUS_MANUFACTURER_BLOCK_ACCESS;
@@ -488,8 +513,9 @@ int BATT_SMBUS::manufacturer_read(const uint16_t cmd_code, void *data, const uns
 		return result;
 	}
 
-	result = _interface->block_read(code, data, length, true);
-	memmove(data, &((uint8_t *)data)[2], length - 2); // remove the address bytes
+	// returns the 2 bytes of addr + data[]
+	result = _interface->block_read(code, data, length + 2, true);
+	memcpy(data, &((uint8_t *)data)[2], length);
 
 	return result;
 }
@@ -502,7 +528,7 @@ int BATT_SMBUS::manufacturer_write(const uint16_t cmd_code, void *data, const un
 	address[0] = ((uint8_t *)&cmd_code)[0];
 	address[1] = ((uint8_t *)&cmd_code)[1];
 
-	uint8_t tx_buf[MAC_DATA_BUFFER_SIZE + 2] = {};
+	uint8_t tx_buf[DATA_BUFFER_SIZE + 2] = {};
 	memcpy(tx_buf, address, 2);
 
 	if (data != nullptr) {
@@ -543,10 +569,10 @@ int BATT_SMBUS::lifetime_data_flush()
 
 int BATT_SMBUS::lifetime_read_block_one()
 {
-	const int buffer_size = 32 + 2; // 32 bytes of data and 2 bytes of address
-	uint8_t lifetime_block_one[buffer_size] = {};
 
-	if (PX4_OK != manufacturer_read(BATT_SMBUS_LIFETIME_BLOCK_ONE, lifetime_block_one, buffer_size)) {
+	uint8_t lifetime_block_one[32] = {};
+
+	if (PX4_OK != manufacturer_read(BATT_SMBUS_LIFETIME_BLOCK_ONE, lifetime_block_one, 32)) {
 		PX4_INFO("Failed to read lifetime block 1.");
 		return PX4_ERROR;
 	}
@@ -564,11 +590,6 @@ int BATT_SMBUS::custom_command(int argc, char *argv[])
 	const char *input = argv[0];
 	uint8_t man_name[22];
 	int result = 0;
-
-	if (!is_running()) {
-		PX4_ERR("not running");
-		return -1;
-	}
 
 	BATT_SMBUS *obj = get_instance();
 
@@ -597,6 +618,11 @@ int BATT_SMBUS::custom_command(int argc, char *argv[])
 		return 0;
 	}
 
+	if (!strcmp(input, "report")) {
+		obj->print_report();
+		return 0;
+	}
+
 	if (!strcmp(input, "suspend")) {
 		obj->suspend();
 		return 0;
@@ -614,7 +640,7 @@ int BATT_SMBUS::custom_command(int argc, char *argv[])
 	}
 
 	if (!strcmp(input, "write_flash")) {
-		if (argc >= 3) {
+		if (argv[1] && argv[2]) {
 			uint16_t address = atoi(argv[1]);
 			unsigned length = atoi(argv[2]);
 			uint8_t tx_buf[32] = {};
@@ -626,9 +652,7 @@ int BATT_SMBUS::custom_command(int argc, char *argv[])
 
 			// Data needs to be fed in 1 byte (0x01) at a time.
 			for (unsigned i = 0; i < length; i++) {
-				if ((unsigned)argc <= 3 + i) {
-					tx_buf[i] = atoi(argv[3 + i]);
-				}
+				tx_buf[i] = atoi(argv[3 + i]);
 			}
 
 			if (PX4_OK != obj->dataflash_write(address, tx_buf, length)) {
@@ -664,13 +688,14 @@ $ batt_smbus -X write_flash 19069 2 27 0
 	PRINT_MODULE_USAGE_NAME("batt_smbus", "driver");
 
 	PRINT_MODULE_USAGE_COMMAND("start");
-	PRINT_MODULE_USAGE_PARAM_FLAG('X', "BATT_SMBUS_BUS_I2C_EXTERNAL", true);
-	PRINT_MODULE_USAGE_PARAM_FLAG('T', "BATT_SMBUS_BUS_I2C_EXTERNAL1", true);
-	PRINT_MODULE_USAGE_PARAM_FLAG('R', "BATT_SMBUS_BUS_I2C_EXTERNAL2", true);
-	PRINT_MODULE_USAGE_PARAM_FLAG('I', "BATT_SMBUS_BUS_I2C_INTERNAL", true);
-	PRINT_MODULE_USAGE_PARAM_FLAG('A', "BATT_SMBUS_BUS_ALL", true);
+	PRINT_MODULE_USAGE_PARAM_STRING('X', "BATT_SMBUS_BUS_I2C_EXTERNAL", nullptr, nullptr, true);
+	PRINT_MODULE_USAGE_PARAM_STRING('T', "BATT_SMBUS_BUS_I2C_EXTERNAL1", nullptr, nullptr, true);
+	PRINT_MODULE_USAGE_PARAM_STRING('R', "BATT_SMBUS_BUS_I2C_EXTERNAL2", nullptr, nullptr, true);
+	PRINT_MODULE_USAGE_PARAM_STRING('I', "BATT_SMBUS_BUS_I2C_INTERNAL", nullptr, nullptr, true);
+	PRINT_MODULE_USAGE_PARAM_STRING('A', "BATT_SMBUS_BUS_ALL", nullptr, nullptr, true);
 
 	PRINT_MODULE_USAGE_COMMAND_DESCR("man_info", "Prints manufacturer info.");
+	PRINT_MODULE_USAGE_COMMAND_DESCR("report",  "Prints the last report.");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("unseal", "Unseals the devices flash memory to enable write_flash commands.");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("seal", "Seals the devices flash memory to disbale write_flash commands.");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("suspend", "Suspends the driver from rescheduling the cycle.");
@@ -680,7 +705,6 @@ $ batt_smbus -X write_flash 19069 2 27 0
 	PRINT_MODULE_USAGE_ARG("address", "The address to start writing.", true);
 	PRINT_MODULE_USAGE_ARG("number of bytes", "Number of bytes to send.", true);
 	PRINT_MODULE_USAGE_ARG("data[0]...data[n]", "One byte of data at a time separated by spaces.", true);
-	PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
 
 	return PX4_OK;
 }

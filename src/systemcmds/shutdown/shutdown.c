@@ -36,7 +36,9 @@
  * Tool similar to UNIX shutdown command.
  */
 
-#include <px4_platform_common/tasks.h>
+#include <px4_tasks.h>
+//#include <systemlib/systemlib.h>
+
 
 __EXPORT int shutdown_main(int argc, char *argv[]);
 

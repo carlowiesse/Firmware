@@ -12,11 +12,13 @@ px4_add_board(
 	IO px4_io-v2_default
 	TESTING
 	UAVCAN_INTERFACES 2
+
 	SERIAL_PORTS
 		GPS1:/dev/ttyS3
 		TEL1:/dev/ttyS1
 		TEL2:/dev/ttyS2
 		TEL4:/dev/ttyS6
+
 	DRIVERS
 		adc
 		barometer # all available barometer drivers
@@ -28,10 +30,8 @@ px4_add_board(
 		dshot
 		gps
 		#heater
-		#imu # all available imu drivers
 		imu/adis16448
-		imu/adis16477
-		imu/adis16497
+		#imu # all available imu drivers
 		imu/l3gd20
 		imu/lsm303d
 		imu/mpu6000
@@ -43,13 +43,12 @@ px4_add_board(
 		lights/rgbled_ncp5623c
 		#lights/rgbled_pwm
 		magnetometer # all available magnetometer drivers
+		#md25
 		mkblctrl
 		#optical_flow # all available optical flow drivers
 		optical_flow/px4flow
-		#osd
 		pca9685
-		#power_monitor/ina226
-		#protocol_splitter
+		protocol_splitter
 		pwm_input
 		pwm_out_sim
 		px4fmu
@@ -60,10 +59,9 @@ px4_add_board(
 		test_ppm
 		tone_alarm
 		uavcan
+
 	MODULES
-		airspeed_selector
 		attitude_estimator_q
-		battery_status
 		camera_feedback
 		commander
 		dataman
@@ -71,6 +69,7 @@ px4_add_board(
 		events
 		fw_att_control
 		fw_pos_control_l1
+		rover_pos_control
 		land_detector
 		landing_target_estimator
 		load_mon
@@ -79,20 +78,17 @@ px4_add_board(
 		mavlink
 		mc_att_control
 		mc_pos_control
-		mc_rate_control
-		#micrortps_bridge
 		navigator
-		rc_update
-		rover_pos_control
+		battery_status
 		sensors
 		sih
-		temperature_compensation
 		vmount
 		vtol_att_control
+		airspeed_selector
+
 	SYSTEMCMDS
 		bl_update
 		config
-		#dmesg
 		dumpfile
 		esc_calib
 		hardfault_log
@@ -117,7 +113,9 @@ px4_add_board(
 		usb_connected
 		ver
 		work_queue
+
 	EXAMPLES
+		bottle_drop # OBC challenge
 		fixedwing_control # Tutorial code from https://px4.io/dev/example_fixedwing_control
 		hello
 		hwtest # Hardware test
@@ -126,4 +124,5 @@ px4_add_board(
 		px4_simple_app # Tutorial code from http://dev.px4.io/en/apps/hello_sky.html
 		rover_steering_control # Rover example app
 		uuv_example_app
+
 	)

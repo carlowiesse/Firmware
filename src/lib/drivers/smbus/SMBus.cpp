@@ -50,6 +50,10 @@ SMBus::SMBus(int bus_num, uint16_t address) :
 {
 }
 
+SMBus::~SMBus()
+{
+}
+
 int SMBus::read_word(const uint8_t cmd_code, uint16_t &data)
 {
 	uint8_t buf[6];
